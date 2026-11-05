@@ -8,6 +8,8 @@ namespace SecureDataBackupSystem.CoreEngine
     {
         public string BackupId { get; set; } = "";
         public string SourceKey { get; set; } = "";
+        public bool IsBaseline { get; set; }
+        public string PreviousBackupId { get; set; } = "";
         public DateTime CreatedUtc { get; set; }
 
         public List<BackupManifestEntry> Files { get; set; }
