@@ -2,6 +2,46 @@ using System.Text;
 using SecureDataBackupSystem.CoreEngine;
 
 Console.OutputEncoding = Encoding.UTF8;
+
+if (args.Length > 0 &&
+    string.Equals(args[0], "restore",
+        StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length != 3)
+    {
+        Console.WriteLine(
+            "Cach dung: restore <manifest.json> <thu_muc_dich>");
+        return;
+    }
+
+    string manifestPath = Path.GetFullPath(args[1]);
+
+    BackupManifest selectedManifest =
+        System.Text.Json.JsonSerializer.Deserialize<BackupManifest>(
+            File.ReadAllText(manifestPath))
+        ?? throw new InvalidDataException(
+            "Manifest khong hop le.");
+
+    if (string.IsNullOrWhiteSpace(selectedManifest.SourceKey))
+        throw new InvalidDataException(
+            "Manifest cu chua co SourceKey.");
+
+    string backupFolder = Path.GetDirectoryName(manifestPath)
+        ?? throw new InvalidDataException(
+            "Duong dan Manifest khong hop le.");
+
+    var restoreEngine = new RestoreEngine();
+
+    restoreEngine.RestoreVersion(
+        backupFolder,
+        selectedManifest.SourceKey,
+        selectedManifest.BackupId,
+        args[2]);
+
+    Console.WriteLine("Restore thanh cong!");
+    return;
+}
+
 Console.WriteLine("=== CORE BACKUP ENGINE - BUOC 1 ===");
 
 string? source = args.Length > 0 ? args[0] : null;
@@ -83,6 +123,35 @@ else
 
 // Quet trang thai hien tai
 var newFiles = FileScanner.Scan(source.Trim().Trim('"'));
+
+string backupHistoryFolder = Path.Combine(
+    Environment.GetFolderPath(
+        Environment.SpecialFolder.UserProfile),
+    "BackupStore");
+
+Directory.CreateDirectory(backupHistoryFolder);
+
+bool createBaseline = !Directory
+    .EnumerateFiles(backupHistoryFolder, "manifest-*.json")
+    .Any(path =>
+    {
+        var previous = System.Text.Json.JsonSerializer
+            .Deserialize<BackupManifest>(File.ReadAllText(path))
+            ?? throw new InvalidDataException(
+                "Manifest khong hop le: " + path);
+
+        return string.Equals(
+            previous.SourceKey,
+            sourceKey,
+            StringComparison.OrdinalIgnoreCase);
+    });
+
+if (createBaseline)
+{
+    oldFiles.Clear();
+    Console.WriteLine(
+        "Tao ban Backup nen cho lich su Restore moi.");
+}
 
 // So sanh 2 lan backup
 var changes = ChangeDetector.Compare(oldFiles, newFiles);
@@ -258,7 +327,7 @@ foreach (var change in changes.Where(
         "Da ghi nhan file bi xoa: " + change.RelativePath);
 }
 
-if (manifest.Files.Count > 0)
+if (manifest.Files.Count > 0 || createBaseline)
 
 {
     string manifestFolder = Path.Combine(
@@ -271,6 +340,8 @@ if (manifest.Files.Count > 0)
     string manifestPath = Path.Combine(
         manifestFolder,
         $"manifest-{manifest.BackupId}.json");
+
+    manifest.SourceKey = sourceKey;
 
     string manifestJson =
         System.Text.Json.JsonSerializer.Serialize(
