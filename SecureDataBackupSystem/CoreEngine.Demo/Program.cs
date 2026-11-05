@@ -131,20 +131,44 @@ string backupHistoryFolder = Path.Combine(
 
 Directory.CreateDirectory(backupHistoryFolder);
 
-bool createBaseline = !Directory
-    .EnumerateFiles(backupHistoryFolder, "manifest-*.json")
-    .Any(path =>
-    {
-        var previous = System.Text.Json.JsonSerializer
-            .Deserialize<BackupManifest>(File.ReadAllText(path))
-            ?? throw new InvalidDataException(
-                "Manifest khong hop le: " + path);
 
-        return string.Equals(
-            previous.SourceKey,
-            sourceKey,
-            StringComparison.OrdinalIgnoreCase);
-    });
+var backupHistory = Directory
+    .EnumerateFiles(backupHistoryFolder, "manifest-*.json")
+    .Select(path =>
+        System.Text.Json.JsonSerializer
+            .Deserialize<BackupManifest>(File.ReadAllText(path))
+        ?? throw new InvalidDataException(
+            "Manifest khong hop le: " + path))
+    .Where(m => string.Equals(
+        m.SourceKey,
+        sourceKey,
+        StringComparison.OrdinalIgnoreCase))
+    .ToList();
+
+// Chi su dung lich su co thong tin lien ket phien ban.
+var versionHistory = backupHistory
+    .Where(m => m.IsBaseline ||
+        !string.IsNullOrWhiteSpace(m.PreviousBackupId))
+    .ToList();
+
+// Tim phien ban cuoi cung theo lien ket, khong dua vao dong ho.
+var latestVersions = versionHistory
+    .Where(m => !versionHistory.Any(next =>
+        string.Equals(
+            next.PreviousBackupId,
+            m.BackupId,
+            StringComparison.OrdinalIgnoreCase)))
+    .ToList();
+
+if (latestVersions.Count > 1)
+    throw new InvalidDataException(
+        "Lich su Backup co nhieu nhanh. Can kiem tra.");
+
+BackupManifest? previousManifest =
+    latestVersions.SingleOrDefault();
+
+bool createBaseline = previousManifest == null;
+
 
 if (createBaseline)
 {
@@ -192,11 +216,15 @@ Console.WriteLine("Chua cap nhat metadata - cho backup thanh cong.");
 
 Console.WriteLine("\n=== INCREMENTAL COMPRESSION ===");
 
+
 var manifest = new BackupManifest
 {
     BackupId = Guid.NewGuid().ToString("N"),
-    CreatedUtc = DateTime.UtcNow
+    CreatedUtc = DateTime.UtcNow,
+    IsBaseline = createBaseline,
+    PreviousBackupId = previousManifest?.BackupId ?? ""
 };
+
 
 foreach (var change in filesToBackup)
 {
