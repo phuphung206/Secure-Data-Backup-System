@@ -7,6 +7,7 @@ namespace SecureDataBackupSystem.CoreEngine
     public sealed class BackupManifest
     {
         public string BackupId { get; set; } = "";
+        public string SourceKey { get; set; } = "";
         public DateTime CreatedUtc { get; set; }
 
         public List<BackupManifestEntry> Files { get; set; }
