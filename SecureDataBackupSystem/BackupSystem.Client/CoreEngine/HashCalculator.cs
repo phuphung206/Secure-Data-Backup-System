@@ -15,7 +15,8 @@ namespace SecureDataBackupSystem.CoreEngine
 
             using (var sha = SHA256.Create())
             using (var stream = new FileStream(
-                filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                filePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                64 * 1024, FileOptions.SequentialScan))
             {
                 byte[] bytes = sha.ComputeHash(stream);
                 return BitConverter.ToString(bytes).Replace("-", "");
