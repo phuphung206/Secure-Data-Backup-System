@@ -55,6 +55,7 @@
   <ItemGroup>
     <Compile Include="BackupService.cs" />
     <Compile Include="BackupPipeline.cs" />
+    <Compile Include="BackupFileEncryptionService.cs" />
     <Compile Include="EncryptionService.cs" />
     <Compile Include="KeyProtectionService.cs" />
     <Compile Include="FormBackup.cs">
