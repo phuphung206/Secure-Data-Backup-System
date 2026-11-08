@@ -45,15 +45,35 @@ namespace SecureDataBackupSystem
                 throw new Exception("Nguồn và đích trùng nhau!");
             }
 
-            // Lịch hiện tại vẫn là Full Backup không mã hóa. Chỉ việc liệt kê,
-            // ánh xạ đích và xử lý file được dùng chung với backup thủ công.
+            // Tác vụ theo lịch phải dùng khóa đã tạo cho tài khoản Windows này.
+            // Kiểm tra khóa trước khi tạo thư mục đích sao lưu.
+            KeyProtectionService.UseExistingKey(key => true);
+
             BackupPipeline.Run(
                 sourcePath,
                 destinationRoot,
                 null,
-                false,
+                true,
                 (source, destination) => true,
-                (source, destination) => File.Copy(source, destination, true),
+                (source, destination) =>
+                {
+                    string temporaryPath = destination + "." +
+                        Guid.NewGuid().ToString("N") + ".tmp";
+                    try
+                    {
+                        BackupFileEncryptionService.EncryptFileWithExistingKey(
+                            source, temporaryPath);
+                        if (File.Exists(destination))
+                            File.Replace(temporaryPath, destination, null);
+                        else
+                            File.Move(temporaryPath, destination);
+                    }
+                    finally
+                    {
+                        if (File.Exists(temporaryPath))
+                            File.Delete(temporaryPath);
+                    }
+                },
                 null);
 
             string historyPath = Path.Combine(backupRoot, "backup_history.txt");
