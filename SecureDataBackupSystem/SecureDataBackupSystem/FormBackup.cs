@@ -115,9 +115,6 @@ namespace SecureDataBackupSystem
         string password,
         IProgress<int> progress)
         {
-            if (encrypt && string.IsNullOrWhiteSpace(password))
-                throw new Exception("Vui lòng nhập mật khẩu mã hóa!");
-
             BackupPipeline.Run(
                 sourceFolder,
                 backupFolder,
@@ -139,6 +136,9 @@ namespace SecureDataBackupSystem
                     {
                         if (encrypt)
                         {
+                            if (!BackupFileEncryptionService.IsEncryptedFile(destination) &&
+                                string.IsNullOrWhiteSpace(password))
+                                throw new Exception("Bản Backup cũ cần mật khẩu để so sánh incremental.");
                             tempFile = System.IO.Path.Combine(
                                 System.IO.Path.GetTempPath(),
                                 Guid.NewGuid().ToString("N") + ".tmp");
@@ -173,7 +173,7 @@ namespace SecureDataBackupSystem
                         Guid.NewGuid().ToString("N") + ".tmp";
                     try
                     {
-                        EncryptFile(file, tempEncrypted, password);
+                        BackupFileEncryptionService.EncryptFile(file, tempEncrypted);
                         if (System.IO.File.Exists(destination))
                         {
                             string oldBackup = destination + ".old";
@@ -196,84 +196,14 @@ namespace SecureDataBackupSystem
                 progress);
         }
 
-        private void EncryptFile(string source, string destination, string password)
-        {
-            byte[] salt = new byte[16];
-            byte[] iv = new byte[16];
-
-            using (var rng = System.Security.Cryptography.RandomNumberGenerator.Create())
-            {
-                rng.GetBytes(salt);
-                rng.GetBytes(iv);
-            }
-
-            using (var derive = new System.Security.Cryptography.Rfc2898DeriveBytes(
-                password, salt, 100000))
-            {
-                byte[] keyMaterial = derive.GetBytes(64);
-
-                byte[] encryptionKey = new byte[32];
-                byte[] macKey = new byte[32];
-
-                Array.Copy(keyMaterial, 0, encryptionKey, 0, 32);
-                Array.Copy(keyMaterial, 32, macKey, 0, 32);
-
-                using (var aes = System.Security.Cryptography.Aes.Create())
-                {
-                    aes.Key = encryptionKey;
-                    aes.IV = iv;
-                    aes.Mode = System.Security.Cryptography.CipherMode.CBC;
-                    aes.Padding = System.Security.Cryptography.PaddingMode.PKCS7;
-
-                    // Tạo file mã hóa tạm
-                    string temp = destination + ".tmp";
-
-                    try
-                    {
-                        using (var output = System.IO.File.Create(temp))
-                        {
-                            output.Write(salt, 0, salt.Length);
-                            output.Write(iv, 0, iv.Length);
-
-                            using (var crypto = new System.Security.Cryptography.CryptoStream(
-                                output, aes.CreateEncryptor(),
-                                System.Security.Cryptography.CryptoStreamMode.Write))
-                            using (var input = System.IO.File.OpenRead(source))
-                            {
-                                input.CopyTo(crypto);
-                            }
-                        }
-
-                        byte[] encryptedData = System.IO.File.ReadAllBytes(temp);
-
-                        using (var hmac = new System.Security.Cryptography.HMACSHA256(macKey))
-                        {
-                            byte[] tag = hmac.ComputeHash(encryptedData);
-
-                            using (var output = System.IO.File.Open(temp, System.IO.FileMode.Append))
-                            {
-                                output.Write(tag, 0, tag.Length);
-                            }
-                        }
-
-                        if (System.IO.File.Exists(destination))
-                        {
-                            throw new Exception("File mã hóa đã tồn tại!");
-                        }
-
-                        System.IO.File.Move(temp, destination);
-                    }
-                    finally
-                    {
-                        if (System.IO.File.Exists(temp))
-                            System.IO.File.Delete(temp);
-                    }
-                }
-            }
-        }
-
         private void DecryptFile(string source, string destination, string password)
         {
+            if (BackupFileEncryptionService.IsEncryptedFile(source))
+            {
+                BackupFileEncryptionService.DecryptFile(source, destination);
+                return;
+            }
+
             byte[] data = System.IO.File.ReadAllBytes(source);
 
             if (data.Length < 64)
@@ -470,12 +400,6 @@ namespace SecureDataBackupSystem
                 bool isIncremental = radIncremental.Checked;
                 bool encrypt = chkEncrypt.Checked;
                 string password = txtPassword.Text;
-                if (encrypt && string.IsNullOrWhiteSpace(password))
-                {
-                    MessageBox.Show("Vui lòng nhập mật khẩu mã hóa!");
-                    return;
-                }
-
                 string destinationRoot = isDirectory
                     ? System.IO.Path.Combine(
                         backupRoot,
@@ -531,6 +455,9 @@ namespace SecureDataBackupSystem
                             {
                                 if (encrypt)
                                 {
+                                    if (!BackupFileEncryptionService.IsEncryptedFile(destination) &&
+                                        string.IsNullOrWhiteSpace(password))
+                                        throw new Exception("Bản Backup cũ cần mật khẩu để so sánh incremental.");
                                     tempFile = System.IO.Path.Combine(
                                         System.IO.Path.GetTempPath(),
                                         Guid.NewGuid().ToString("N") + ".tmp");
@@ -563,7 +490,18 @@ namespace SecureDataBackupSystem
 
                             if (isFull)
                             {
-                                EncryptFile(file, destination, password);
+                                string tempFullEncrypted = destination + "." +
+                                    Guid.NewGuid().ToString("N") + ".tmp";
+                                try
+                                {
+                                    BackupFileEncryptionService.EncryptFile(file, tempFullEncrypted);
+                                    System.IO.File.Move(tempFullEncrypted, destination);
+                                }
+                                finally
+                                {
+                                    if (System.IO.File.Exists(tempFullEncrypted))
+                                        System.IO.File.Delete(tempFullEncrypted);
+                                }
                                 return;
                             }
 
@@ -571,7 +509,7 @@ namespace SecureDataBackupSystem
                                 Guid.NewGuid().ToString("N") + ".tmp";
                             try
                             {
-                                EncryptFile(file, tempEncrypted, password);
+                                BackupFileEncryptionService.EncryptFile(file, tempEncrypted);
                                 if (System.IO.File.Exists(destination))
                                     System.IO.File.Replace(tempEncrypted, destination, null);
                                 else
@@ -680,7 +618,8 @@ namespace SecureDataBackupSystem
                                 if (dialog.FileName.EndsWith(
                                     ".enc", StringComparison.OrdinalIgnoreCase))
                                 {
-                                    if (string.IsNullOrWhiteSpace(txtPassword.Text))
+                                    if (!BackupFileEncryptionService.IsEncryptedFile(dialog.FileName) &&
+                                        string.IsNullOrWhiteSpace(txtPassword.Text))
                                     {
                                         MessageBox.Show("Vui lòng nhập mật khẩu giải mã!");
                                         return;
@@ -787,7 +726,8 @@ namespace SecureDataBackupSystem
                 if (file.EndsWith(".enc",
                     StringComparison.OrdinalIgnoreCase))
                 {
-                    if (string.IsNullOrWhiteSpace(password))
+                    if (!BackupFileEncryptionService.IsEncryptedFile(file) &&
+                        string.IsNullOrWhiteSpace(password))
                         throw new Exception("Vui lòng nhập mật khẩu giải mã!");
 
                     DecryptFile(file, target, password);
