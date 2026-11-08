@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.IO;
 using System.Diagnostics;
+using System.Security.Principal;
 
 namespace SecureDataBackupSystem
 {
@@ -111,6 +112,9 @@ namespace SecureDataBackupSystem
 
             // Lấy đường dẫn file EXE của ứng dụng
             string exePath = Application.ExecutablePath;
+            string runAsUser = WindowsIdentity.GetCurrent().Name;
+            if (string.IsNullOrWhiteSpace(runAsUser))
+                throw new Exception("Không xác định được tài khoản Windows hiện tại.");
 
             // Lưu đường dẫn nguồn vào file cấu hình
             string configFolder = Path.Combine(
@@ -136,6 +140,7 @@ namespace SecureDataBackupSystem
                 " /MO " + interval + // Số ngày giữa các lần sao lưu
                 dayArgument +
                 " /ST " + time +
+                " /RU \"" + runAsUser + "\" /IT" +
                 " /TR \"" + taskCommand + "\"";
 
             // Gọi Windows Task Scheduler

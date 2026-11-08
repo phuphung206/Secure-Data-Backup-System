@@ -39,42 +39,61 @@ namespace SecureDataBackupSystem
         {
             KeyProtectionService.UseOrCreateKey(key =>
             {
-                using (FileStream input = File.OpenRead(source))
-                using (FileStream output = File.Create(destination))
-                {
-                    output.Write(Magic, 0, Magic.Length);
-                    byte[] buffer = new byte[EncryptionService.MaxChunkSizeBytes];
-                    try
-                    {
-                        long chunkIndex = 0;
-                        int read;
-                        while ((read = ReadChunk(input, buffer)) > 0)
-                        {
-                            byte[] plaintext = new byte[read];
-                            try
-                            {
-                                Buffer.BlockCopy(buffer, 0, plaintext, 0, read);
-                                WriteFrame(output, EncryptionService.EncryptChunk(
-                                    plaintext, key, CreateAssociatedData(chunkIndex, false)));
-                            }
-                            finally
-                            {
-                                Array.Clear(plaintext, 0, plaintext.Length);
-                                Array.Clear(buffer, 0, read);
-                            }
-                            chunkIndex++;
-                        }
-
-                        WriteFrame(output, EncryptionService.EncryptChunk(
-                            new byte[0], key, CreateAssociatedData(chunkIndex, true)));
-                    }
-                    finally
-                    {
-                        Array.Clear(buffer, 0, buffer.Length);
-                    }
-                }
+                EncryptFileWithKey(source, destination, key);
                 return true;
             });
+        }
+
+        internal static void EncryptFileWithExistingKey(
+            string source,
+            string destination)
+        {
+            KeyProtectionService.UseExistingKey(key =>
+            {
+                EncryptFileWithKey(source, destination, key);
+                return true;
+            });
+        }
+
+        private static void EncryptFileWithKey(
+            string source,
+            string destination,
+            byte[] key)
+        {
+            using (FileStream input = File.OpenRead(source))
+            using (FileStream output = File.Create(destination))
+            {
+                output.Write(Magic, 0, Magic.Length);
+                byte[] buffer = new byte[EncryptionService.MaxChunkSizeBytes];
+                try
+                {
+                    long chunkIndex = 0;
+                    int read;
+                    while ((read = ReadChunk(input, buffer)) > 0)
+                    {
+                        byte[] plaintext = new byte[read];
+                        try
+                        {
+                            Buffer.BlockCopy(buffer, 0, plaintext, 0, read);
+                            WriteFrame(output, EncryptionService.EncryptChunk(
+                                plaintext, key, CreateAssociatedData(chunkIndex, false)));
+                        }
+                        finally
+                        {
+                            Array.Clear(plaintext, 0, plaintext.Length);
+                            Array.Clear(buffer, 0, read);
+                        }
+                        chunkIndex++;
+                    }
+
+                    WriteFrame(output, EncryptionService.EncryptChunk(
+                        new byte[0], key, CreateAssociatedData(chunkIndex, true)));
+                }
+                finally
+                {
+                    Array.Clear(buffer, 0, buffer.Length);
+                }
+            }
         }
 
         internal static void DecryptFile(string source, string destination)
