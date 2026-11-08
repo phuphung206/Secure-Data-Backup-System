@@ -121,7 +121,7 @@
             this.lblTienTrinh.AutoSize = true;
             this.lblTienTrinh.Font = new System.Drawing.Font("Segoe UI", 12F, System.Drawing.FontStyle.Bold);
             this.lblTienTrinh.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(15)))), ((int)(((byte)(50)))), ((int)(((byte)(90)))));
-            this.lblTienTrinh.Location = new System.Drawing.Point(50, 350);
+            this.lblTienTrinh.Location = new System.Drawing.Point(50, 393);
             this.lblTienTrinh.Margin = new System.Windows.Forms.Padding(7, 0, 7, 0);
             this.lblTienTrinh.Name = "lblTienTrinh";
             this.lblTienTrinh.Size = new System.Drawing.Size(216, 32);
@@ -133,7 +133,7 @@
             this.lblStatus.AutoSize = true;
             this.lblStatus.Font = new System.Drawing.Font("Segoe UI", 11F);
             this.lblStatus.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(13)))), ((int)(((byte)(50)))), ((int)(((byte)(90)))));
-            this.lblStatus.Location = new System.Drawing.Point(50, 435);
+            this.lblStatus.Location = new System.Drawing.Point(50, 463);
             this.lblStatus.Margin = new System.Windows.Forms.Padding(7, 0, 7, 0);
             this.lblStatus.Name = "lblStatus";
             this.lblStatus.Size = new System.Drawing.Size(205, 30);
@@ -211,7 +211,7 @@
             // 
             // progressBar1
             // 
-            this.progressBar1.Location = new System.Drawing.Point(50, 390);
+            this.progressBar1.Location = new System.Drawing.Point(50, 427);
             this.progressBar1.Margin = new System.Windows.Forms.Padding(7, 8, 7, 8);
             this.progressBar1.Name = "progressBar1";
             this.progressBar1.Size = new System.Drawing.Size(710, 27);
@@ -400,7 +400,7 @@
             this.lblPassword.AutoSize = true;
             this.lblPassword.Font = new System.Drawing.Font("Segoe UI", 11F, System.Drawing.FontStyle.Bold);
             this.lblPassword.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(23)))), ((int)(((byte)(52)))), ((int)(((byte)(92)))));
-            this.lblPassword.Location = new System.Drawing.Point(594, 384);
+            this.lblPassword.Location = new System.Drawing.Point(50, 325);
             this.lblPassword.Margin = new System.Windows.Forms.Padding(7, 0, 7, 0);
             this.lblPassword.Name = "lblPassword";
             this.lblPassword.Size = new System.Drawing.Size(193, 30);
@@ -412,12 +412,12 @@
             // txtPassword
             // 
             this.txtPassword.BackColor = System.Drawing.Color.White;
-            this.txtPassword.BorderStyle = System.Windows.Forms.BorderStyle.None;
+            this.txtPassword.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.txtPassword.Font = new System.Drawing.Font("Segoe UI", 14F);
-            this.txtPassword.Location = new System.Drawing.Point(449, 454);
+            this.txtPassword.Location = new System.Drawing.Point(50, 355);
             this.txtPassword.Margin = new System.Windows.Forms.Padding(7, 8, 7, 8);
             this.txtPassword.Name = "txtPassword";
-            this.txtPassword.Size = new System.Drawing.Size(50, 38);
+            this.txtPassword.Size = new System.Drawing.Size(200, 38);
             this.txtPassword.TabIndex = 18;
             this.txtPassword.UseSystemPasswordChar = true;
             this.txtPassword.Visible = false;
@@ -428,14 +428,14 @@
             this.chkEncrypt.AutoSize = true;
             this.chkEncrypt.Font = new System.Drawing.Font("Segoe UI", 11F);
             this.chkEncrypt.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(23)))), ((int)(((byte)(52)))), ((int)(((byte)(92)))));
-            this.chkEncrypt.Location = new System.Drawing.Point(449, 429);
+            this.chkEncrypt.Location = new System.Drawing.Point(50, 280);
             this.chkEncrypt.Margin = new System.Windows.Forms.Padding(7, 8, 7, 8);
             this.chkEncrypt.Name = "chkEncrypt";
             this.chkEncrypt.Size = new System.Drawing.Size(184, 34);
-            this.chkEncrypt.TabIndex = 19;
+            this.chkEncrypt.TabIndex = 18;
             this.chkEncrypt.Text = "Mã hóa dữ liệu";
             this.chkEncrypt.UseVisualStyleBackColor = true;
-            this.chkEncrypt.Visible = false;
+            this.chkEncrypt.Visible = true;
             this.chkEncrypt.CheckedChanged += new System.EventHandler(this.chkEncrypt_CheckedChanged);
             // 
             // fileSystemWatcher1
