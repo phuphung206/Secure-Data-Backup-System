@@ -14,6 +14,7 @@ namespace SecureDataBackupSystem
         public FormRestore()
         {
             InitializeComponent();
+            cboBackup.SelectedIndexChanged += cboBackup_SelectedIndexChanged;
         }
 
         // Lưu đường dẫn thật của file Backup
@@ -87,10 +88,86 @@ namespace SecureDataBackupSystem
             }
         }
 
+        private void cboBackup_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            BackupItem selected = cboBackup.SelectedItem as BackupItem;
+            if (selected == null || selected.IsFolder)
+            {
+                lblDecryptPassword.Text = "Khóa DPAPI / mật khẩu";
+                txtPassword.Enabled = selected != null;
+                chkShowPassword.Enabled = selected != null;
+                return;
+            }
+
+            bool encrypted = selected.FilePath.EndsWith(
+                ".enc", StringComparison.OrdinalIgnoreCase);
+            bool usesProtectedKey = encrypted &&
+                BackupFileEncryptionService.IsEncryptedFile(selected.FilePath);
+            bool usesPasswordKey = encrypted &&
+                BackupFileEncryptionService.IsPasswordEncryptedFile(selected.FilePath);
+
+            if (usesProtectedKey)
+            {
+                lblDecryptPassword.Text = "Khóa Windows (DPAPI)";
+                txtPassword.Clear();
+            }
+            else if (usesPasswordKey)
+            {
+                lblDecryptPassword.Text = "Mật khẩu giải mã";
+            }
+            else if (encrypted)
+            {
+                lblDecryptPassword.Text = "Mật khẩu backup cũ";
+            }
+            else
+            {
+                lblDecryptPassword.Text = "Không cần giải mã";
+                txtPassword.Clear();
+            }
+
+            txtPassword.Enabled = encrypted && !usesProtectedKey;
+            chkShowPassword.Enabled = txtPassword.Enabled;
+        }
+
         // Giải mã file Backup
         private void DecryptFile(
             string source, string destination, string password)
         {
+            if (BackupFileEncryptionService.IsEncryptedFile(source))
+            {
+                ValidateProtectedKey();
+                try
+                {
+                    BackupFileEncryptionService.DecryptFile(source, destination);
+                }
+                catch (System.Security.Cryptography.CryptographicException ex)
+                {
+                    throw new InvalidDataException(
+                        "Không xác thực được dữ liệu Backup; file có thể đã bị thay đổi hoặc khóa không khớp.",
+                        ex);
+                }
+                return;
+            }
+            if (BackupFileEncryptionService.IsPasswordEncryptedFile(source))
+            {
+                try
+                {
+                    BackupFileEncryptionService.DecryptFileWithPassword(
+                        source, destination, password);
+                }
+                catch (System.Security.Cryptography.CryptographicException ex)
+                {
+                    throw new InvalidDataException(
+                        "Mật khẩu không đúng hoặc dữ liệu Backup đã bị thay đổi.",
+                        ex);
+                }
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(password))
+                throw new InvalidOperationException(
+                    "Backup cũ cần mật khẩu để giải mã.");
+
             byte[] data = File.ReadAllBytes(source);
 
             if (data.Length < 64)
@@ -219,11 +296,15 @@ namespace SecureDataBackupSystem
 
                 string destinationFull = Path.GetFullPath(destinationFolder)
                     .TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
+                string backupRootFull = Path.GetFullPath(backupFolder)
+                    .TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
 
-                if (destinationFull.StartsWith(
-                    sourceFull, StringComparison.OrdinalIgnoreCase))
+                if (destinationFull.StartsWith(sourceFull,
+                        StringComparison.OrdinalIgnoreCase) ||
+                    destinationFull.StartsWith(backupRootFull,
+                        StringComparison.OrdinalIgnoreCase))
                 {
-                    MessageBox.Show("Không được khôi phục vào trong thư mục Backup!");
+                    MessageBox.Show("Hãy chọn nơi khôi phục bên ngoài thư mục Backup!");
                     return;
                 }
 
@@ -266,10 +347,13 @@ namespace SecureDataBackupSystem
 
             bool encrypted = source.EndsWith(
                 ".enc", StringComparison.OrdinalIgnoreCase);
+            bool usesProtectedKey = encrypted &&
+                BackupFileEncryptionService.IsEncryptedFile(source);
 
-            if (encrypted && string.IsNullOrWhiteSpace(txtPassword.Text))
+            if (encrypted && !usesProtectedKey &&
+                string.IsNullOrWhiteSpace(txtPassword.Text))
             {
-                MessageBox.Show("Vui lòng nhập mật khẩu giải mã!");
+                MessageBox.Show("Backup cũ cần mật khẩu để giải mã!");
                 return;
             }
 
@@ -455,73 +539,138 @@ namespace SecureDataBackupSystem
                                    string destinationFolder,
                                    string password)
         {
-            // Tạo thư mục đích để chứa dữ liệu được khôi phục
-            Directory.CreateDirectory(destinationFolder);
+            if (Directory.Exists(destinationFolder) || File.Exists(destinationFolder))
+                throw new IOException("Đường dẫn khôi phục đã tồn tại.");
 
-            // Lấy danh sách tất cả thư mục con trong thư mục Backup
-            foreach (string folder in Directory.GetDirectories(
-                sourceFolder, "*", SearchOption.AllDirectories))
+            string[] files = Directory.GetFiles(
+                sourceFolder, "*", SearchOption.AllDirectories);
+            bool needsProtectedKey = false;
+            bool needsLegacyPassword = false;
+
+            foreach (string file in files)
             {
-                // Lấy đường dẫn tương đối của thư mục con
-                // Ví dụ: Backup\HinhAnh -> HinhAnh
-                string relativePath = folder.Substring(
-                    sourceFolder.Length).TrimStart('\\', '/');
+                if (file.EndsWith(".enc.old", StringComparison.OrdinalIgnoreCase))
+                    continue;
 
-                // Tạo lại thư mục con tại nơi khôi phục
-                Directory.CreateDirectory(
-                    Path.Combine(destinationFolder, relativePath));
+                if (!file.EndsWith(".enc", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (BackupFileEncryptionService.IsEncryptedFile(file))
+                    needsProtectedKey = true;
+                else
+                    needsLegacyPassword = true;
             }
 
-            // Duyệt tất cả file trong thư mục Backup và thư mục con
-            foreach (string file in Directory.GetFiles(
-                sourceFolder, "*", SearchOption.AllDirectories))
+            if (needsLegacyPassword && string.IsNullOrWhiteSpace(password))
+                throw new InvalidOperationException(
+                    "Backup cũ cần mật khẩu để giải mã.");
+
+            if (needsProtectedKey)
+                ValidateProtectedKey();
+
+            string destinationPrefix = Path.GetFullPath(destinationFolder)
+                .TrimEnd(Path.DirectorySeparatorChar,
+                         Path.AltDirectorySeparatorChar) +
+                Path.DirectorySeparatorChar;
+
+            Directory.CreateDirectory(destinationFolder);
+            try
             {
-                // Lấy đường dẫn tương đối của file
-                // Giúp giữ nguyên cấu trúc thư mục ban đầu
-                string relativePath = file.Substring(
-                    sourceFolder.Length).TrimStart('\\', '/');
-
-                // Kiểm tra file có được mã hóa hay không
-                // File có đuôi .enc được xem là file mã hóa
-                bool encrypted = file.EndsWith(
-                    ".enc", StringComparison.OrdinalIgnoreCase);
-
-                // Nếu file mã hóa thì bỏ đuôi .enc
-                // Ví dụ: baitap.txt.enc -> baitap.txt
-                if (encrypted)
+                foreach (string folder in Directory.GetDirectories(
+                    sourceFolder, "*", SearchOption.AllDirectories))
                 {
-                    relativePath = relativePath.Substring(
-                        0, relativePath.Length - 4);
+                    string relativePath = folder.Substring(
+                        sourceFolder.Length).TrimStart('\\', '/');
+                    string destination = Path.GetFullPath(Path.Combine(
+                        destinationFolder, relativePath));
+                    if (!destination.StartsWith(
+                        destinationPrefix, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidDataException(
+                            "Đường dẫn thư mục trong Backup không hợp lệ.");
+                    Directory.CreateDirectory(destination);
                 }
 
-                // Xác định đường dẫn lưu file sau khi khôi phục
-                string destination = Path.Combine(
-                    destinationFolder, relativePath);
-
-                // Không cho ghi đè lên file đã tồn tại
-                if (File.Exists(destination))
+                foreach (string file in files)
                 {
-                    throw new Exception(
-                        "File đã tồn tại: " + destination);
-                }
+                    if (file.EndsWith(".enc.old",
+                        StringComparison.OrdinalIgnoreCase))
+                        continue;
 
-                if (encrypted)
-                {
-                    // File mã hóa phải có mật khẩu giải mã
-                    if (string.IsNullOrWhiteSpace(password))
+                    string relativePath = file.Substring(
+                        sourceFolder.Length).TrimStart('\\', '/');
+                    bool encrypted = file.EndsWith(
+                        ".enc", StringComparison.OrdinalIgnoreCase);
+                    if (encrypted)
+                        relativePath = relativePath.Substring(
+                            0, relativePath.Length - 4);
+
+                    string destination = Path.GetFullPath(Path.Combine(
+                        destinationFolder, relativePath));
+                    if (!destination.StartsWith(
+                        destinationPrefix, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidDataException(
+                            "Đường dẫn file trong Backup không hợp lệ.");
+                    if (File.Exists(destination))
+                        throw new IOException(
+                            "File đã tồn tại: " + destination);
+
+                    string destinationDirectory = Path.GetDirectoryName(destination);
+                    Directory.CreateDirectory(destinationDirectory);
+                    string temporaryPath = Path.Combine(
+                        destinationDirectory,
+                        ".restore_" + Guid.NewGuid().ToString("N") + ".tmp");
+                    try
                     {
-                        throw new Exception(
-                            "Vui lòng nhập mật khẩu giải mã!");
-                    }
+                        if (encrypted)
+                            DecryptFile(file, temporaryPath, password);
+                        else
+                            File.Copy(file, temporaryPath);
 
-                    // Gọi hàm DecryptFile có sẵn để giải mã file
-                    DecryptFile(file, destination, password);
+                        File.Move(temporaryPath, destination);
+                    }
+                    finally
+                    {
+                        if (File.Exists(temporaryPath))
+                            File.Delete(temporaryPath);
+                    }
                 }
-                else
+            }
+            catch (Exception restoreException)
+            {
+                try
                 {
-                    // File không mã hóa thì sao chép trực tiếp
-                    File.Copy(file, destination);
+                    if (Directory.Exists(destinationFolder))
+                        Directory.Delete(destinationFolder, true);
                 }
+                catch (Exception cleanupException)
+                {
+                    throw new AggregateException(
+                        "Khôi phục thất bại và không thể dọn dữ liệu khôi phục tạm.",
+                        restoreException,
+                        cleanupException);
+                }
+
+                throw;
+            }
+        }
+
+        private void ValidateProtectedKey()
+        {
+            try
+            {
+                KeyProtectionService.UseExistingKey(key => true);
+            }
+            catch (FileNotFoundException ex)
+            {
+                throw new InvalidOperationException(
+                    "Không tìm thấy khóa DPAPI của tài khoản Windows hiện tại.",
+                    ex);
+            }
+            catch (System.Security.Cryptography.CryptographicException ex)
+            {
+                throw new InvalidOperationException(
+                    "Không mở được khóa DPAPI. Hãy dùng đúng tài khoản Windows đã tạo khóa.",
+                    ex);
             }
         }
 

@@ -115,6 +115,9 @@ namespace SecureDataBackupSystem
         string password,
         IProgress<int> progress)
         {
+            if (encrypt && string.IsNullOrWhiteSpace(password))
+                throw new Exception("Vui lòng nhập mật khẩu mã hóa!");
+
             BackupPipeline.Run(
                 sourceFolder,
                 backupFolder,
@@ -173,7 +176,8 @@ namespace SecureDataBackupSystem
                         Guid.NewGuid().ToString("N") + ".tmp";
                     try
                     {
-                        BackupFileEncryptionService.EncryptFile(file, tempEncrypted);
+                        BackupFileEncryptionService.EncryptFileWithPassword(
+                            file, tempEncrypted, password);
                         if (System.IO.File.Exists(destination))
                         {
                             string oldBackup = destination + ".old";
@@ -201,6 +205,12 @@ namespace SecureDataBackupSystem
             if (BackupFileEncryptionService.IsEncryptedFile(source))
             {
                 BackupFileEncryptionService.DecryptFile(source, destination);
+                return;
+            }
+            if (BackupFileEncryptionService.IsPasswordEncryptedFile(source))
+            {
+                BackupFileEncryptionService.DecryptFileWithPassword(
+                    source, destination, password);
                 return;
             }
 
@@ -400,6 +410,11 @@ namespace SecureDataBackupSystem
                 bool isIncremental = radIncremental.Checked;
                 bool encrypt = chkEncrypt.Checked;
                 string password = txtPassword.Text;
+                if (encrypt && string.IsNullOrWhiteSpace(password))
+                {
+                    MessageBox.Show("Vui lòng nhập mật khẩu mã hóa!");
+                    return;
+                }
                 string destinationRoot = isDirectory
                     ? System.IO.Path.Combine(
                         backupRoot,
@@ -494,7 +509,8 @@ namespace SecureDataBackupSystem
                                     Guid.NewGuid().ToString("N") + ".tmp";
                                 try
                                 {
-                                    BackupFileEncryptionService.EncryptFile(file, tempFullEncrypted);
+                                    BackupFileEncryptionService.EncryptFileWithPassword(
+                                        file, tempFullEncrypted, password);
                                     System.IO.File.Move(tempFullEncrypted, destination);
                                 }
                                 finally
@@ -509,7 +525,8 @@ namespace SecureDataBackupSystem
                                 Guid.NewGuid().ToString("N") + ".tmp";
                             try
                             {
-                                BackupFileEncryptionService.EncryptFile(file, tempEncrypted);
+                                BackupFileEncryptionService.EncryptFileWithPassword(
+                                    file, tempEncrypted, password);
                                 if (System.IO.File.Exists(destination))
                                     System.IO.File.Replace(tempEncrypted, destination, null);
                                 else
@@ -990,6 +1007,10 @@ namespace SecureDataBackupSystem
 
         private void chkEncrypt_CheckedChanged(object sender, EventArgs e)
         {
+            lblPassword.Visible = chkEncrypt.Checked;
+            txtPassword.Visible = chkEncrypt.Checked;
+            if (!chkEncrypt.Checked)
+                txtPassword.Clear();
         }
 
         private void lblPassword_Click(object sender, EventArgs e)
