@@ -1,4 +1,4 @@
-﻿
+
 using System;
 using System.Windows.Forms;
 
@@ -40,6 +40,11 @@ namespace SecureDataBackupSystem
         private void btnBackup_Click(object sender, EventArgs e)
         {
             OpenForm(backupForm);
+        }
+
+        private void btnNetworkBackup_Click(object sender, EventArgs e)
+        {
+            OpenForm(new FormNetworkBackup());
         }
 
         private void btnRestore_Click(object sender, EventArgs e)

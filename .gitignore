@@ -282,6 +282,10 @@ Generated_Code/
 # because we have git ;-)
 _UpgradeReport_Files/
 Backup*/
+!BackupSystem*/
+!**/BackupSystem*/**
+**/[Bb]in/
+**/[Oo]bj/
 UpgradeLog*.XML
 UpgradeLog*.htm
 ServiceFabricBackup/
