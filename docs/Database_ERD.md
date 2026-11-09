@@ -1,48 +1,52 @@
+# Database ERD
+
+```mermaid
 erDiagram
-    USERS ||--o{ BACKUP_VERSIONS : "thực hiện (1-N)"
-    USERS ||--o{ SECURITY_LOGS : "ghi nhận (1-N)"
-    BACKUP_VERSIONS ||--o{ BACKED_UP_FILES : "bao gồm (1-N)"
+    USERS ||--o{ BACKUP_VERSIONS : "thuc hien (1-N)"
+    USERS ||--o{ SECURITY_LOGS : "ghi nhan (1-N)"
+    BACKUP_VERSIONS ||--o{ BACKED_UP_FILES : "bao gom (1-N)"
 
     USERS {
-        int UserId PK "Khóa chính (Auto Increment)"
-        varchar Username UK "Tên đăng nhập duy nhất"
-        varchar PasswordHash "Mật khẩu đã băm (SHA-256/BCrypt)"
-        varchar MachineName "Tên máy tính Client"
-        bigint QuotaBytes "Giới hạn dung lượng lưu trữ"
-        bigint UsedBytes "Dung lượng đã sử dụng"
-        datetime CreatedAt "Ngày tạo tài khoản"
+        int UserId PK "Khoa chinh (Auto Increment)"
+        varchar Username UK "Ten dang nhap duy nhat"
+        varchar PasswordHash "Mat khau da bam (SHA-256)"
+        varchar MachineName "Ten may tinh Client"
+        bigint QuotaBytes "Gioi han dung luong luu tru"
+        bigint UsedBytes "Dung luong da su dung"
+        datetime CreatedAt "Ngay tao tai khoan"
     }
 
     BACKUP_VERSIONS {
-        int VersionId PK "Khóa chính (Auto Increment)"
-        int UserId FK "Tham chiếu USERS(UserId)"
-        varchar BackupType "FULL hoặc INCREMENTAL"
-        varchar RootClientPath "Thư mục gốc trên máy Client"
-        int TotalFiles "Tổng số file trong phiên bản"
-        bigint TotalSizeBytes "Tổng dung lượng (Bytes)"
-        varchar Status "IN_PROGRESS | COMPLETED | BLOCKED_BY_AI | FAILED"
-        datetime CreatedAt "Thời điểm sao lưu"
+        int VersionId PK "Khoa chinh (Auto Increment)"
+        int UserId FK "Tham chieu USERS(UserId)"
+        varchar BackupType "FULL hoac INCREMENTAL"
+        varchar RootClientPath "Thu muc goc tren may Client"
+        int TotalFiles "Tong so file trong phien ban"
+        bigint TotalSizeBytes "Tong dung luong (Bytes)"
+        varchar Status "IN_PROGRESS - COMPLETED - BLOCKED_BY_AI - FAILED"
+        datetime CreatedAt "Thoi diem sao luu"
     }
 
     BACKED_UP_FILES {
-        int FileId PK "Khóa chính (Auto Increment)"
-        int VersionId FK "Tham chiếu BACKUP_VERSIONS(VersionId)"
-        varchar RelativePath "Đường dẫn tương đối của file"
-        varchar FileExtension "Đuôi file (.docx, .pdf...)"
-        char Sha256Hash "Mã băm SHA-256 của file gốc (64 ký tự)"
-        bigint OriginalSizeBytes "Dung lượng trước khi nén/mã hóa"
-        bigint EncryptedSizeBytes "Dung lượng lưu trên Server"
-        varchar AesIv "Vector khởi tạo (IV) 16-byte dạng Base64 cho AES-256"
-        varchar ChangeType "ADDED | MODIFIED | UNCHANGED | DELETED"
-        datetime LastModifiedTime "Thời gian sửa đổi cuối ở Client"
-        varchar ServerPhysicalPath "Đường dẫn file .enc trên ổ cứng Server"
+        int FileId PK "Khoa chinh (Auto Increment)"
+        int VersionId FK "Tham chieu BACKUP_VERSIONS(VersionId)"
+        varchar RelativePath "Duong dan tuong doi cua file"
+        varchar FileExtension "Duoi file (.docx, .pdf)"
+        char Sha256Hash "Ma bam SHA-256 cua file goc"
+        bigint OriginalSizeBytes "Dung luong truoc khi nen"
+        bigint EncryptedSizeBytes "Dung luong luu tren Server"
+        varchar AesIv "Vector khoi tao (IV) 16-byte Base64"
+        varchar ChangeType "ADDED - MODIFIED - UNCHANGED - DELETED"
+        datetime LastModifiedTime "Thoi gian sua doi cuoi o Client"
+        varchar ServerPhysicalPath "Duong dan file .enc tren o cung Server"
     }
 
     SECURITY_LOGS {
-        int LogId PK "Khóa chính (Auto Increment)"
-        int UserId FK "Tham chiếu USERS(UserId)"
-        varchar EventType "RANSOMWARE_DETECTED | AUTH_FAILED | CONNECTION_DROP"
-        float AnomalyScore "Điểm bất thường từ Python AI (0.0 - 1.0)"
-        text Description "Chi tiết (VD: Đổi đuôi 50 file trong 2 giây)"
-        datetime CreatedAt "Thời gian phát hiện"
+        int LogId PK "Khoa chinh (Auto Increment)"
+        int UserId FK "Tham chieu USERS(UserId)"
+        varchar EventType "RANSOMWARE_DETECTED - AUTH_FAILED"
+        float AnomalyScore "Diem bat thuong tu Python AI (0.0 - 1.0)"
+        text Description "Chi tiet hanh vi bat thuong"
+        datetime CreatedAt "Thoi gian phat hien"
     }
+```
