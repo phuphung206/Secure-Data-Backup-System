@@ -23,7 +23,6 @@ namespace BackupSystem.Server.DataAccess
             var connection = new SqliteConnection(ConnectionString);
             connection.Open();
 
-            // Bật ràng buộc khóa ngoại (Foreign Keys) trong SQLite
             using var pragmaCmd = connection.CreateCommand();
             pragmaCmd.CommandText = "PRAGMA foreign_keys = ON;";
             pragmaCmd.ExecuteNonQuery();
@@ -46,16 +45,34 @@ namespace BackupSystem.Server.DataAccess
                     CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
 
+                CREATE TABLE IF NOT EXISTS BackupConfigs (
+                    ConfigId INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UserId INTEGER NOT NULL,
+                    SourceFolderPath TEXT NOT NULL,
+                    AllowedExtensions TEXT DEFAULT '*.*',
+                    ExcludedPatterns TEXT DEFAULT '.tmp;.log;bin;obj',
+                    ScheduleCron TEXT DEFAULT 'DAILY_00:00',
+                    EnableRealtimeWatch INTEGER DEFAULT 1,
+                    IsActive INTEGER DEFAULT 1,
+                    UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (UserId) REFERENCES Users(UserId) ON DELETE CASCADE
+                );
+
                 CREATE TABLE IF NOT EXISTS BackupVersions (
                     VersionId INTEGER PRIMARY KEY AUTOINCREMENT,
                     UserId INTEGER NOT NULL,
+                    ConfigId INTEGER,
+                    ParentVersionId INTEGER,
                     BackupType TEXT NOT NULL CHECK(BackupType IN ('FULL', 'INCREMENTAL')),
+                    TriggerType TEXT DEFAULT 'MANUAL',
                     RootClientPath TEXT NOT NULL,
                     TotalFiles INTEGER DEFAULT 0,
                     TotalSizeBytes INTEGER DEFAULT 0,
                     Status TEXT NOT NULL DEFAULT 'IN_PROGRESS',
                     CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (UserId) REFERENCES Users(UserId) ON DELETE CASCADE
+                    FOREIGN KEY (UserId) REFERENCES Users(UserId) ON DELETE CASCADE,
+                    FOREIGN KEY (ConfigId) REFERENCES BackupConfigs(ConfigId) ON DELETE SET NULL,
+                    FOREIGN KEY (ParentVersionId) REFERENCES BackupVersions(VersionId) ON DELETE SET NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS BackedUpFiles (
@@ -67,9 +84,22 @@ namespace BackupSystem.Server.DataAccess
                     OriginalSizeBytes INTEGER NOT NULL,
                     EncryptedSizeBytes INTEGER NOT NULL,
                     AesIv TEXT NOT NULL,
+                    TotalChunks INTEGER DEFAULT 1,
                     ChangeType TEXT NOT NULL DEFAULT 'MODIFIED',
                     LastModifiedTime DATETIME NOT NULL,
                     ServerPhysicalPath TEXT NOT NULL,
+                    FOREIGN KEY (VersionId) REFERENCES BackupVersions(VersionId) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS RestoreLogs (
+                    RestoreId INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UserId INTEGER NOT NULL,
+                    VersionId INTEGER NOT NULL,
+                    RestoreScope TEXT NOT NULL CHECK(RestoreScope IN ('FULL_FOLDER', 'SINGLE_FILE')),
+                    TargetFilePath TEXT NOT NULL,
+                    Status TEXT NOT NULL DEFAULT 'COMPLETED',
+                    RestoredAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (UserId) REFERENCES Users(UserId) ON DELETE CASCADE,
                     FOREIGN KEY (VersionId) REFERENCES BackupVersions(VersionId) ON DELETE CASCADE
                 );
 
@@ -78,6 +108,7 @@ namespace BackupSystem.Server.DataAccess
                     UserId INTEGER NOT NULL,
                     EventType TEXT NOT NULL,
                     AnomalyScore REAL DEFAULT 0.0,
+                    AffectedFilesCount INTEGER DEFAULT 0,
                     Description TEXT,
                     CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (UserId) REFERENCES Users(UserId) ON DELETE CASCADE
@@ -89,10 +120,10 @@ namespace BackupSystem.Server.DataAccess
             ";
             cmd.ExecuteNonQuery();
 
-            SeedDefaultUser(conn);
+            SeedDefaultUserAndConfig(conn);
         }
 
-        private static void SeedDefaultUser(SqliteConnection conn)
+        private static void SeedDefaultUserAndConfig(SqliteConnection conn)
         {
             using var checkCmd = conn.CreateCommand();
             checkCmd.CommandText = "SELECT COUNT(1) FROM Users WHERE Username = 'admin';";
@@ -103,7 +134,10 @@ namespace BackupSystem.Server.DataAccess
                 using var insertCmd = conn.CreateCommand();
                 insertCmd.CommandText = @"
                     INSERT INTO Users (Username, PasswordHash, MachineName, QuotaBytes)
-                    VALUES ('admin', $passHash, 'DEFAULT-CLIENT-PC', 10737418240);";
+                    VALUES ('admin', $passHash, 'DEFAULT-CLIENT-PC', 10737418240);
+                    
+                    INSERT INTO BackupConfigs (UserId, SourceFolderPath, AllowedExtensions, ScheduleCron, EnableRealtimeWatch)
+                    VALUES (last_insert_rowid(), 'D:\ImportantData', '.docx;.xlsx;.pdf;.cs', 'DAILY_23:00', 1);";
                 insertCmd.Parameters.AddWithValue("$passHash", HashPassword("123456"));
                 insertCmd.ExecuteNonQuery();
             }
