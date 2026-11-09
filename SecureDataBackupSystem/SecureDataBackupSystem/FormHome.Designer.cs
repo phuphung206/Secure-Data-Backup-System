@@ -1,4 +1,4 @@
-﻿namespace SecureDataBackupSystem
+namespace SecureDataBackupSystem
 {
     partial class FormHome
     {
@@ -31,6 +31,7 @@
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(FormHome));
             this.panelMenu = new System.Windows.Forms.Panel();
             this.btnSchedule = new System.Windows.Forms.Button();
+            this.btnNetworkBackup = new System.Windows.Forms.Button();
             this.btnSettings = new System.Windows.Forms.Button();
             this.btnHome = new System.Windows.Forms.Button();
             this.btnHistory = new System.Windows.Forms.Button();
@@ -49,6 +50,7 @@
             // 
             this.panelMenu.BackColor = System.Drawing.Color.SteelBlue;
             this.panelMenu.Controls.Add(this.btnSchedule);
+            this.panelMenu.Controls.Add(this.btnNetworkBackup);
             this.panelMenu.Controls.Add(this.btnSettings);
             this.panelMenu.Controls.Add(this.btnHome);
             this.panelMenu.Controls.Add(this.btnHistory);
@@ -150,6 +152,21 @@
             this.btnRestore.UseVisualStyleBackColor = false;
             this.btnRestore.Click += new System.EventHandler(this.btnRestore_Click);
             // 
+            // btnNetworkBackup
+            // 
+            this.btnNetworkBackup.BackColor = System.Drawing.Color.White;
+            this.btnNetworkBackup.FlatAppearance.BorderSize = 0;
+            this.btnNetworkBackup.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnNetworkBackup.Font = new System.Drawing.Font("Segoe UI", 11F, System.Drawing.FontStyle.Bold);
+            this.btnNetworkBackup.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(15)))), ((int)(((byte)(50)))), ((int)(((byte)(90)))));
+            this.btnNetworkBackup.Location = new System.Drawing.Point(20, 445);
+            this.btnNetworkBackup.Name = "btnNetworkBackup";
+            this.btnNetworkBackup.Size = new System.Drawing.Size(159, 47);
+            this.btnNetworkBackup.TabIndex = 6;
+            this.btnNetworkBackup.Text = "Sao lưu mạng";
+            this.btnNetworkBackup.UseVisualStyleBackColor = false;
+            this.btnNetworkBackup.Click += new System.EventHandler(this.btnNetworkBackup_Click);
+            // 
             // panelContent
             // 
             this.panelContent.Controls.Add(this.picHome);
@@ -234,5 +251,6 @@
         private System.Windows.Forms.Label lblWelcome;
         private System.Windows.Forms.PictureBox picHome;
         private System.Windows.Forms.Button btnSchedule;
+        private System.Windows.Forms.Button btnNetworkBackup;
     }
 }

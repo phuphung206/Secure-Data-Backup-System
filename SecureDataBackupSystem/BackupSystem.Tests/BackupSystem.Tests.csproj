@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>BackupSystem.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BackupSystem.Server\BackupSystem.Server.csproj" />
+    <ProjectReference Include="..\BackupSystem.Client\BackupSystem.Client.csproj" />
+  </ItemGroup>
+</Project>
