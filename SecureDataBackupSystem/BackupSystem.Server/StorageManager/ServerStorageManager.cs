@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using BackupSystem.Shared.Chunking;
 using BackupSystem.Shared.Models;
@@ -208,6 +209,51 @@ namespace BackupSystem.Server.StorageManager
             string cleanRelative = relativePath.Replace('/', Path.DirectorySeparatorChar).TrimStart(Path.DirectorySeparatorChar);
             string targetPath = Path.Combine(_backupStoreRoot, backupId, cleanRelative);
             return File.Exists(targetPath) ? targetPath : null;
+        }
+
+        /// <summary>
+        /// Liệt kê toàn bộ các file đã sao lưu trong kho BackupStore trên Server.
+        /// </summary>
+        public List<RemoteBackupFileEntry> ListBackupFiles()
+        {
+            var result = new List<RemoteBackupFileEntry>();
+            if (!Directory.Exists(_backupStoreRoot))
+                return result;
+
+            string storePrefix = Path.GetFullPath(_backupStoreRoot)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+            foreach (string file in Directory.GetFiles(_backupStoreRoot, "*", SearchOption.AllDirectories))
+            {
+                string fileName = Path.GetFileName(file);
+                if (fileName.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
+                    fileName.EndsWith(".sqlite", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                string fullFile = Path.GetFullPath(file);
+                if (!fullFile.StartsWith(storePrefix, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                string relInStore = fullFile.Substring(storePrefix.Length);
+                int sepIndex = relInStore.IndexOfAny(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar });
+                if (sepIndex <= 0 || sepIndex >= relInStore.Length - 1)
+                    continue;
+
+                string backupId = relInStore.Substring(0, sepIndex);
+                string relativePath = relInStore.Substring(sepIndex + 1).Replace('\\', '/');
+                var info = new FileInfo(fullFile);
+
+                result.Add(new RemoteBackupFileEntry
+                {
+                    BackupId = backupId,
+                    RelativePath = relativePath,
+                    FileSize = info.Length,
+                    LastModifiedUtc = info.LastWriteTimeUtc
+                });
+            }
+
+            result.Sort((a, b) => b.LastModifiedUtc.CompareTo(a.LastModifiedUtc));
+            return result;
         }
 
         /// <summary>

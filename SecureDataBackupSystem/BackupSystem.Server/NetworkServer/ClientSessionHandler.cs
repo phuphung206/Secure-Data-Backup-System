@@ -118,6 +118,10 @@ namespace BackupSystem.Server.NetworkServer
                     await HandleRestoreChunkAsync(packet).ConfigureAwait(false);
                     break;
 
+                case PacketType.RestoreListRequest:
+                    await HandleRestoreListAsync().ConfigureAwait(false);
+                    break;
+
                 case PacketType.Disconnect:
                     Log($"[DISCONNECT] Nhận gói tin Disconnect từ Client {RemoteEndPoint}.");
                     _cts.Cancel();
@@ -273,6 +277,15 @@ namespace BackupSystem.Server.NetworkServer
             {
                 Log($"[KHÔI PHỤC THÀNH CÔNG] Đã truyền trả file '{Path.GetFileName(fileInfo.FilePath)}' ({totalChunks} chunks, {TransferProgressReport.FormatBytes(file.Length)}) về Client {RemoteEndPoint}!");
             }
+        }
+
+        private async Task HandleRestoreListAsync()
+        {
+            var files = _storageManager.ListBackupFiles();
+            var resp = new RestoreListResponsePayload { Files = files };
+            byte[] respBytes = PacketSerializationHelper.SerializeJson(resp);
+            Log($"[RESTORE LIST] Gửi danh sách {files.Count} file backup tới Client {RemoteEndPoint}.");
+            await SendPacketAsync(new NetworkPacket(PacketType.RestoreListResponse, respBytes)).ConfigureAwait(false);
         }
 
         #endregion

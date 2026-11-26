@@ -32,13 +32,31 @@ namespace SecureDataBackupSystem
 
 
         private string historyPath = BackupSystem.Shared.Models.BackupPaths.GetHistoryFilePath();
+        private string _lastHistorySignature = string.Empty;
 
+        private string GetHistorySignature()
+        {
+            if (!System.IO.File.Exists(historyPath))
+                return "MISSING";
+
+            var info = new System.IO.FileInfo(historyPath);
+            return $"{info.LastWriteTimeUtc.Ticks}|{info.Length}";
+        }
 
         /// <summary>
         /// hàm đọc ls
         /// </summary>
-        private void LoadHistory()
+        private void LoadHistory(bool onlyIfChanged = false)
         {
+            string signature = GetHistorySignature();
+            if (onlyIfChanged && signature == _lastHistorySignature)
+                return;
+
+            _lastHistorySignature = signature;
+
+            int savedFirstRow = dgvHistory.FirstDisplayedScrollingRowIndex;
+            int savedSelectedRow = dgvHistory.CurrentRow != null ? dgvHistory.CurrentRow.Index : -1;
+
             dgvHistory.Rows.Clear();
 
             if (!System.IO.File.Exists(historyPath))
@@ -56,6 +74,20 @@ namespace SecureDataBackupSystem
                         data[2],
                         data[3]
                     );
+                }
+            }
+
+            if (dgvHistory.Rows.Count > 0)
+            {
+                if (savedSelectedRow >= 0 && savedSelectedRow < dgvHistory.Rows.Count)
+                {
+                    dgvHistory.ClearSelection();
+                    dgvHistory.Rows[savedSelectedRow].Selected = true;
+                }
+
+                if (savedFirstRow >= 0 && savedFirstRow < dgvHistory.Rows.Count)
+                {
+                    dgvHistory.FirstDisplayedScrollingRowIndex = savedFirstRow;
                 }
             }
         }
@@ -106,7 +138,7 @@ namespace SecureDataBackupSystem
         // Tự động cập nhật lịch sử mỗi 5 giây
         private void timerHistory_Tick(object sender, EventArgs e)
         {
-            LoadHistory(); // Đọc lại lịch sử từ file
+            LoadHistory(onlyIfChanged: true); // Chỉ đọc lại khi file lịch sử thực sự thay đổi
         }
     }
 }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Sockets;
@@ -436,6 +437,24 @@ namespace BackupSystem.Client.NetworkClient
 
                 return true;
             }
+        }
+
+        /// <summary>
+        /// Lấy danh sách các file backup hiện có trên Server để hỗ trợ khôi phục từ xa.
+        /// </summary>
+        public async Task<List<RemoteBackupFileEntry>> ListRemoteBackupFilesAsync(CancellationToken cancellationToken = default)
+        {
+            if (!IsConnected || _networkStream == null)
+                throw new InvalidOperationException("Chưa kết nối tới Backup Server.");
+
+            await SendPacketAsync(new NetworkPacket(PacketType.RestoreListRequest, Array.Empty<byte>()), cancellationToken).ConfigureAwait(false);
+
+            var respPacket = await ReceivePacketAsync(cancellationToken).ConfigureAwait(false);
+            if (respPacket == null || respPacket.Type != PacketType.RestoreListResponse)
+                return new List<RemoteBackupFileEntry>();
+
+            var resp = PacketSerializationHelper.DeserializeJson<RestoreListResponsePayload>(respPacket.Payload);
+            return resp?.Files ?? new List<RemoteBackupFileEntry>();
         }
 
         /// <summary>
