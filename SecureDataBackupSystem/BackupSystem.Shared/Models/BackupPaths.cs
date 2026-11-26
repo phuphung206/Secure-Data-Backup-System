@@ -12,7 +12,7 @@ namespace BackupSystem.Shared.Models
     {
         public static string GetBackupRoot()
         {
-            string solutionRoot = FindSolutionRoot(AppDomain.CurrentDomain.BaseDirectory)
+            string? solutionRoot = FindSolutionRoot(AppDomain.CurrentDomain.BaseDirectory)
                 ?? FindSolutionRoot(Directory.GetCurrentDirectory());
 
             if (!string.IsNullOrWhiteSpace(solutionRoot))
@@ -43,7 +43,7 @@ namespace BackupSystem.Shared.Models
             return Path.Combine(GetBackupRoot(), "backup_history.txt");
         }
 
-        private static string FindSolutionRoot(string startDir)
+        private static string? FindSolutionRoot(string startDir)
         {
             if (string.IsNullOrWhiteSpace(startDir) || !Directory.Exists(startDir))
                 return null;
