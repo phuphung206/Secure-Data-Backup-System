@@ -440,3 +440,5 @@ venv/
 *.sqlite3
 ServerStorage/
 TempChunks/
+
+SecureDataBackupSystem/SecureDataBackup/

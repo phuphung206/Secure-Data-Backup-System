@@ -139,6 +139,10 @@
     <Compile Include="..\BackupSystem.Shared\Models\*.cs" Link="Shared\Models\%(Filename)%(Extension)" />
     <Compile Include="..\BackupSystem.Shared\Chunking\*.cs" Link="Shared\Chunking\%(Filename)%(Extension)" />
     <Compile Include="..\BackupSystem.Client\NetworkClient\*.cs" Link="Client\NetworkClient\%(Filename)%(Extension)" />
+    <Compile Include="..\BackupSystem.Client\Security\*.cs" Link="Client\Security\%(Filename)%(Extension)" />
+    <None Include="..\BackupSystem.AI\ransomware_detector.py" Link="ransomware_detector.py">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="FormNetworkBackup.resx">

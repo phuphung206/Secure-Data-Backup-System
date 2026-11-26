@@ -10,6 +10,8 @@ namespace SecureDataBackupSystem
     public partial class FormNetworkBackup : Form
     {
         private readonly NetworkBackupWorker _worker;
+        private NetworkBackupWorkerArgs _lastArgs;
+        private readonly string _historyPath = BackupPaths.GetHistoryFilePath();
 
         public FormNetworkBackup()
         {
@@ -99,6 +101,15 @@ namespace SecureDataBackupSystem
             }
         }
 
+        private void chkEncrypt_CheckedChanged(object sender, EventArgs e)
+        {
+            txtPassword.Enabled = chkEncrypt.Checked;
+            if (chkEncrypt.Checked)
+            {
+                txtPassword.Focus();
+            }
+        }
+
         private void btnStart_Click(object sender, EventArgs e)
         {
             string source = txtSourcePath.Text.Trim();
@@ -111,6 +122,14 @@ namespace SecureDataBackupSystem
             if (!File.Exists(source) && !Directory.Exists(source))
             {
                 MessageBox.Show("Đường dẫn nguồn không tồn tại trên máy tính!", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            // Kiểm tra mật khẩu nếu chọn mã hóa AES-256
+            if (chkEncrypt.Checked && string.IsNullOrWhiteSpace(txtPassword.Text))
+            {
+                MessageBox.Show("Vui lòng nhập mật khẩu để bảo vệ và mã hóa dữ liệu AES-256!", "Yêu cầu mật khẩu", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtPassword.Focus();
                 return;
             }
 
@@ -135,7 +154,12 @@ namespace SecureDataBackupSystem
                 SourcePath = source,
                 BackupId = "backup_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
                 ChunkSize = chunkSize,
-                IsSingleFile = File.Exists(source)
+                IsSingleFile = File.Exists(source),
+                IsIncremental = radIncremental.Checked,
+                AllowedExtensions = string.IsNullOrWhiteSpace(txtFilter.Text) ? "*.*" : txtFilter.Text.Trim(),
+                EncryptBeforeTransfer = chkEncrypt.Checked,
+                EncryptionPassword = txtPassword.Text,
+                EnableAiRansomwareProtection = chkAiProtection.Checked
             };
 
             // Thiết lập trạng thái giao diện UI
@@ -147,11 +171,16 @@ namespace SecureDataBackupSystem
             lblSpeed.Text = "Tốc độ: 0.0 MB/s";
             lblChunks.Text = "Gói tin: 0 / 0";
             lblEta.Text = "Còn lại: --:--";
-            lblCurrentFile.Text = "Trạng thái: Bắt đầu kết nối...";
+            lblCurrentFile.Text = "Trạng thái: Đang chuẩn bị...";
 
-            Log($"[BẮT ĐẦU] Khởi chạy tiến trình sao lưu mạng dưới nền (Chunk: {chunkSize / 1024} KB)...");
+            string modeText = args.IsIncremental ? "Incremental (Gia tăng)" : "Full (Toàn bộ)";
+            string encText = args.EncryptBeforeTransfer ? ", Mã hóa AES-256: BẬT" : string.Empty;
+            string aiText = args.EnableAiRansomwareProtection ? ", AI Ransomware: BẬT" : string.Empty;
 
-            // Kích hoạt BackgroundWorker (chạy ngầm chống treo UI hoàn hảo)
+            Log($"[BẮT ĐẦU] Khởi chạy sao lưu TCP: Chế độ {modeText}{encText}{aiText} (Chunk: {chunkSize / 1024} KB)...");
+
+            _lastArgs = args;
+            // Kích hoạt BackgroundWorker (chạy ngầm chống treo UI)
             _worker.StartBackup(args);
         }
 
@@ -180,6 +209,10 @@ namespace SecureDataBackupSystem
             {
                 Log($"[TRUYỀN FILE] {report.FileName} ({TransferProgressReport.FormatBytes(report.TotalBytes)}) - {report.TotalChunks} chunks");
             }
+            else if (report.StatusMessage.Contains("AI đang phân tích") || report.StatusMessage.Contains("Ransomware"))
+            {
+                Log($"[AI BẢO MẬT] {report.StatusMessage}");
+            }
         }
 
         private void Worker_TransferCompleted(NetworkBackupWorkerResult result)
@@ -188,11 +221,31 @@ namespace SecureDataBackupSystem
             btnCancel.Enabled = false;
             btnPingServer.Enabled = true;
 
+            string modeLabel = (_lastArgs != null && _lastArgs.IsIncremental) ? "Mạng TCP (Incremental)" : "Mạng TCP (Full)";
+            string sourceLabel = _lastArgs != null ? _lastArgs.SourcePath : txtSourcePath.Text.Trim();
+
             if (result.IsCancelled)
             {
                 Log("[ĐÃ HỦY] Tiến trình sao lưu mạng đã bị hủy bởi người dùng.");
                 lblCurrentFile.Text = "Trạng thái: Đã hủy tác vụ.";
+                AddHistory(modeLabel, sourceLabel, "Đã hủy");
                 MessageBox.Show("Tác vụ sao lưu mạng đã được hủy an toàn.", "Thông báo", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else if (result.RansomwareThreat != null || result.Error is BackupSystem.Client.Security.RansomwareThreatDetectedException)
+            {
+                lblCurrentFile.Text = "Trạng thái: ⛔ BỊ CHẶN BỞI AI CHỐNG RANSOMWARE!";
+                progressBarTransfer.Value = 0;
+                lblPercent.Text = "0%";
+                Log($"[CẢNH BÁO NGUY CƠ CAO] {result.Message}");
+                AddHistory(modeLabel, sourceLabel, "Chặn bởi AI Ransomware");
+
+                MessageBox.Show(
+                    $"⛔ PHÁT HIỆN DẤU HIỆU TẤN CÔNG RANSOMWARE!\n\n" +
+                    $"{result.Message}\n\n" +
+                    $"Hệ thống đã CHẶN NGAY LẬP TỨC quá trình sao lưu để bảo vệ dữ liệu sạch trước đó trên máy chủ Server!",
+                    "AI Phát hiện Ransomware - Chặn Sao Lưu",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Stop);
             }
             else if (result.Success)
             {
@@ -200,13 +253,61 @@ namespace SecureDataBackupSystem
                 lblPercent.Text = "100%";
                 lblCurrentFile.Text = "Trạng thái: Hoàn tất 100%!";
                 Log($"[HOÀN TẤT] {result.Message}");
+                AddHistory(modeLabel, sourceLabel, $"Thành công ({result.TransferredFilesCount} file)");
                 MessageBox.Show(result.Message, "Sao lưu thành công", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             else
             {
                 lblCurrentFile.Text = "Trạng thái: Gặp sự cố!";
                 Log($"[THẤT BẠI] {result.Message}");
+                AddHistory(modeLabel, sourceLabel, "Thất bại");
                 MessageBox.Show($"Quá trình sao lưu mạng thất bại:\n{result.Message}", "Lỗi sao lưu", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void AddHistory(string mode, string sourcePath, string status)
+        {
+            try
+            {
+                string dir = Path.GetDirectoryName(_historyPath);
+                if (!string.IsNullOrEmpty(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+                string time = DateTime.Now.ToString("dd/MM/yyyy HH:mm:ss");
+                string line = string.Join("\t", time, mode, sourcePath.TrimEnd('\\', '/'), status);
+                File.AppendAllText(_historyPath, line + Environment.NewLine);
+            }
+            catch { }
+        }
+
+        private void btnOpenHistory_Click(object sender, EventArgs e)
+        {
+            using (var frm = new FormHistory())
+            {
+                frm.Text = "Lịch sử sao lưu";
+                frm.FormBorderStyle = FormBorderStyle.Sizable;
+                frm.ControlBox = true;
+                frm.MinimizeBox = true;
+                frm.MaximizeBox = true;
+                frm.StartPosition = FormStartPosition.CenterParent;
+                frm.ShowDialog(this);
+            }
+        }
+
+        private void btnOpenRestore_Click(object sender, EventArgs e)
+        {
+            using (var frm = new FormRestore())
+            {
+                frm.Text = "Khôi phục dữ liệu";
+                frm.ServerHost = txtServerIp.Text.Trim();
+                frm.ServerPort = (int)numPort.Value;
+                frm.FormBorderStyle = FormBorderStyle.Sizable;
+                frm.ControlBox = true;
+                frm.MinimizeBox = true;
+                frm.MaximizeBox = true;
+                frm.StartPosition = FormStartPosition.CenterParent;
+                frm.ShowDialog(this);
             }
         }
 
@@ -223,4 +324,3 @@ namespace SecureDataBackupSystem
         }
     }
 }
-

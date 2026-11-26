@@ -30,7 +30,7 @@ namespace BackupSystem.Server.App
                 port = customPort;
             }
 
-            string storageDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ServerStorage");
+            string storageDir = BackupPaths.GetBackupRoot();
             if (args.Length > 1 && !string.IsNullOrWhiteSpace(args[1]))
             {
                 storageDir = Path.GetFullPath(args[1]);
@@ -39,6 +39,16 @@ namespace BackupSystem.Server.App
             Console.WriteLine($"[CẤU HÌNH] Cổng dịch vụ : {port}");
             Console.WriteLine($"[CẤU HÌNH] Kho lưu trữ : {storageDir}");
             Console.WriteLine($"[CẤU HÌNH] Kích thước chunk mặc định: {NetworkProtocolConstants.DefaultChunkSize / 1024} KB\n");
+
+            try
+            {
+                BackupSystem.Server.DataAccess.DbConnectionFactory.InitializeDatabase();
+                Console.WriteLine($"[CƠ SỞ DỮ LIỆU] SQLite Database đã sẵn sàng: {BackupSystem.Server.DataAccess.DbConnectionFactory.DbFilePath}\n");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[CẢNH BÁO DB] Chưa thể khởi tạo SQLite Database: {ex.Message}\n");
+            }
 
             using (var server = new TcpBackupServer(storageDir))
             {

@@ -1,4 +1,4 @@
-﻿
+
 using System;
 using System.IO;
 using System.Windows.Forms;
@@ -7,9 +7,9 @@ namespace SecureDataBackupSystem
 {
     public partial class FormRestore : Form
     {
-        private string backupFolder = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-            "SecureDataBackup");
+        private string backupFolder = BackupSystem.Shared.Models.BackupPaths.GetBackupRoot();
+        public string ServerHost { get; set; } = "127.0.0.1";
+        public int ServerPort { get; set; } = BackupSystem.Shared.Network.NetworkProtocolConstants.DefaultPort;
 
         public FormRestore()
         {
@@ -21,11 +21,14 @@ namespace SecureDataBackupSystem
         private class BackupItem
         {
             public string FilePath { get; set; }
+            public string DisplayName { get; set; }
             // Phân biệt file và thư mục
             public bool IsFolder { get; set; }
             public override string ToString()
             {
-                return (IsFolder ? "[Thư mục] " : "[File] ") + FilePath;
+                if (!string.IsNullOrEmpty(DisplayName))
+                    return DisplayName;
+                return (IsFolder ? "[Thư mục] " : "[File] ") + Path.GetFileName(FilePath);
             }
         }
 
@@ -45,30 +48,50 @@ namespace SecureDataBackupSystem
             {
                 string[] files = Directory.GetFiles(
                     backupFolder, "*", SearchOption.AllDirectories);
-                // Lấy các thư mục Backup trực tiếp trong thư mục lưu trữ
-                string[] folders = Directory.GetDirectories(
-                    backupFolder, "*", SearchOption.TopDirectoryOnly);
-                // Thêm thư mục vào danh sách chọn Backup
-                foreach (string folder in folders)
-                {
-                    cboBackup.Items.Add(new BackupItem
-                    {
-                        FilePath = folder,
-                        IsFolder = true
-                    });
-                }
+
+                string rootPrefix = Path.GetFullPath(backupFolder)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                string storePrefix = Path.GetFullPath(Path.Combine(backupFolder, "BackupStore"))
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
 
                 foreach (string file in files)
                 {
-                    // Không hiển thị file lịch sử
-                    if (Path.GetFileName(file).Equals(
-                        "backup_history.txt",
-                        StringComparison.OrdinalIgnoreCase))
+                    // Không hiển thị file lịch sử, database hoặc file tạm
+                    string fileName = Path.GetFileName(file);
+                    if (fileName.Equals("backup_history.txt", StringComparison.OrdinalIgnoreCase) || fileName.EndsWith(".sqlite", StringComparison.OrdinalIgnoreCase) || file.IndexOf(Path.DirectorySeparatorChar + ".assembling" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) >= 0 || file.IndexOf(Path.DirectorySeparatorChar + "Database" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) >= 0)
                         continue;
+
+                    string fullFile = Path.GetFullPath(file);
+                    string display;
+                    if (fullFile.StartsWith(storePrefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        string relInStore = fullFile.Substring(storePrefix.Length);
+                        int slashIdx = relInStore.IndexOfAny(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar });
+                        if (slashIdx > 0 && slashIdx < relInStore.Length - 1)
+                        {
+                            string backupId = relInStore.Substring(0, slashIdx);
+                            string relFile = relInStore.Substring(slashIdx + 1);
+                            display = $"{relFile}  [{backupId}]";
+                        }
+                        else
+                        {
+                            display = relInStore;
+                        }
+                    }
+                    else if (fullFile.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        display = fullFile.Substring(rootPrefix.Length);
+                    }
+                    else
+                    {
+                        display = fileName;
+                    }
 
                     cboBackup.Items.Add(new BackupItem
                     {
-                        FilePath = file
+                        FilePath = file,
+                        DisplayName = display,
+                        IsFolder = false
                     });
                 }
 
@@ -101,12 +124,18 @@ namespace SecureDataBackupSystem
 
             bool encrypted = selected.FilePath.EndsWith(
                 ".enc", StringComparison.OrdinalIgnoreCase);
+            bool usesNetworkAes = encrypted &&
+                BackupSystem.Client.Security.AesEncryptionHelper.IsEncrypted(selected.FilePath);
             bool usesProtectedKey = encrypted &&
                 BackupFileEncryptionService.IsEncryptedFile(selected.FilePath);
             bool usesPasswordKey = encrypted &&
                 BackupFileEncryptionService.IsPasswordEncryptedFile(selected.FilePath);
 
-            if (usesProtectedKey)
+            if (usesNetworkAes)
+            {
+                lblDecryptPassword.Text = "Mật khẩu giải mã (AES-256)";
+            }
+            else if (usesProtectedKey)
             {
                 lblDecryptPassword.Text = "Khóa Windows (DPAPI)";
                 txtPassword.Clear();
@@ -133,6 +162,22 @@ namespace SecureDataBackupSystem
         private void DecryptFile(
             string source, string destination, string password)
         {
+            if (BackupSystem.Client.Security.AesEncryptionHelper.IsEncrypted(source))
+            {
+                if (string.IsNullOrWhiteSpace(password))
+                    throw new InvalidOperationException("File sao lưu mạng AES-256 cần mật khẩu để giải mã.");
+                try
+                {
+                    BackupSystem.Client.Security.AesEncryptionHelper.DecryptFile(source, destination, password);
+                }
+                catch (System.Security.Cryptography.CryptographicException ex)
+                {
+                    throw new InvalidDataException(
+                        "Mật khẩu không đúng hoặc dữ liệu Backup đã bị thay đổi.",
+                        ex);
+                }
+                return;
+            }
             if (BackupFileEncryptionService.IsEncryptedFile(source))
             {
                 ValidateProtectedKey();
@@ -252,7 +297,7 @@ namespace SecureDataBackupSystem
         }
 
         // Bắt đầu khôi phục
-        private void btnRestore_Click(
+        private async void btnRestore_Click(
             object sender, EventArgs e)
         {
             BackupItem selected =
@@ -395,19 +440,35 @@ namespace SecureDataBackupSystem
             string tempFile = Path.Combine(
                 folder,
                 ".restore_" + Guid.NewGuid().ToString("N") + ".tmp");
+            string networkTempFile = null;
 
             progressRestore.Value = 0;
             lblStatus.Text = "Đang khôi phục...";
+            btnRestore.Enabled = false;
 
             try
             {
+                string effectiveSource = source;
+                if (TryParseBackupStorePath(source, out string backupId, out string relativePath))
+                {
+                    networkTempFile = Path.Combine(
+                        Path.GetTempPath(),
+                        ".net_restore_" + Guid.NewGuid().ToString("N") + ".tmp");
+
+                    bool downloadedFromServer = await TryDownloadFromServerAsync(backupId, relativePath, networkTempFile);
+                    if (downloadedFromServer && File.Exists(networkTempFile))
+                    {
+                        effectiveSource = networkTempFile;
+                    }
+                }
+
                 if (encrypted)
                 {
-                    DecryptFile(source, tempFile, txtPassword.Text);
+                    DecryptFile(effectiveSource, tempFile, txtPassword.Text);
                 }
                 else
                 {
-                    File.Copy(source, tempFile);
+                    File.Copy(effectiveSource, tempFile);
                 }
 
                 File.Move(tempFile, destination);
@@ -425,8 +486,64 @@ namespace SecureDataBackupSystem
             }
             finally
             {
+                btnRestore.Enabled = true;
                 if (File.Exists(tempFile))
                     File.Delete(tempFile);
+                if (networkTempFile != null && File.Exists(networkTempFile))
+                    File.Delete(networkTempFile);
+            }
+        }
+
+        private bool TryParseBackupStorePath(string physicalPath, out string backupId, out string relativePath)
+        {
+            backupId = string.Empty;
+            relativePath = string.Empty;
+            try
+            {
+                string storeRoot = Path.GetFullPath(Path.Combine(backupFolder, "BackupStore"))
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                string fullFile = Path.GetFullPath(physicalPath);
+
+                if (!fullFile.StartsWith(storeRoot, StringComparison.OrdinalIgnoreCase))
+                    return false;
+
+                string remainder = fullFile.Substring(storeRoot.Length);
+                int sepIndex = remainder.IndexOfAny(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar });
+                if (sepIndex <= 0 || sepIndex >= remainder.Length - 1)
+                    return false;
+
+                backupId = remainder.Substring(0, sepIndex);
+                relativePath = remainder.Substring(sepIndex + 1).Replace('\\', '/');
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private async System.Threading.Tasks.Task<bool> TryDownloadFromServerAsync(string backupId, string relativePath, string localDest)
+        {
+            try
+            {
+                using (var client = new BackupSystem.Client.NetworkClient.TcpBackupClient())
+                {
+                    bool connected = await client.ConnectAsync(ServerHost, ServerPort, 1500);
+                    if (!connected) return false;
+
+                    lblStatus.Text = $"Đang tải dữ liệu khôi phục từ Server {ServerHost}:{ServerPort}...";
+                    var progress = new Progress<BackupSystem.Shared.Models.TransferProgressReport>(report =>
+                    {
+                        progressRestore.Value = Math.Min(100, Math.Max(0, report.ProgressPercentage));
+                        lblStatus.Text = report.StatusMessage;
+                    });
+
+                    return await client.DownloadFileAsync(backupId, relativePath, localDest, progress);
+                }
+            }
+            catch
+            {
+                return false;
             }
         }
 
