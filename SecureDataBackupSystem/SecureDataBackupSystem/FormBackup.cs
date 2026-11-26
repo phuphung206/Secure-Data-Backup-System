@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -48,12 +48,7 @@ namespace SecureDataBackupSystem
             LoadHistory();
         }
         
-        private string historyPath = System.IO.Path.Combine(
-            Environment.GetFolderPath(
-                Environment.SpecialFolder.MyDocuments),
-            "SecureDataBackup",
-            "backup_history.txt"
-        );
+        private string historyPath = BackupSystem.Shared.Models.BackupPaths.GetHistoryFilePath();
 
         private void AddHistory(string mode, string status)
         {
@@ -202,6 +197,11 @@ namespace SecureDataBackupSystem
 
         private void DecryptFile(string source, string destination, string password)
         {
+            if (BackupSystem.Client.Security.AesEncryptionHelper.IsEncrypted(source))
+            {
+                BackupSystem.Client.Security.AesEncryptionHelper.DecryptFile(source, destination, password);
+                return;
+            }
             if (BackupFileEncryptionService.IsEncryptedFile(source))
             {
                 BackupFileEncryptionService.DecryptFile(source, destination);
@@ -363,9 +363,7 @@ namespace SecureDataBackupSystem
                     return;
                 }
 
-                string backupRoot = System.IO.Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                    "SecureDataBackup");
+                string backupRoot = BackupSystem.Shared.Models.BackupPaths.GetBackupRoot();
                 string sourcePath = System.IO.Path.GetFullPath(txtFile.Text);
                 string rootPath = System.IO.Path.GetFullPath(backupRoot);
                 bool isDirectory = System.IO.Directory.Exists(sourcePath);
@@ -420,6 +418,30 @@ namespace SecureDataBackupSystem
                         backupRoot,
                         new System.IO.DirectoryInfo(sourcePath).Name)
                     : backupRoot;
+
+                // [AI Ransomware Protection] Kiểm tra độ bất thường & quét mã độc trước khi sao lưu
+                try
+                {
+                    lblStatus.Text = "🤖 AI đang kiểm tra phòng chống Ransomware...";
+                    var aiResult = BackupSystem.Client.Security.RansomwareProtectionService.AnalyzeFiles(sourcePath);
+                    if (aiResult.IsRansomwareDetected)
+                    {
+                        lblStatus.Text = "⛔ Đã chặn sao lưu do phát hiện Ransomware!";
+                        MessageBox.Show(
+                            $"⛔ CẢNH BÁO NGUY HIỂM TỪ AI CHỐNG RANSOMWARE!\n\n" +
+                            $"{aiResult.Message}\n\n" +
+                            $"Hệ thống đã CHẶN NGAY LẬP TỨC tiến trình sao lưu để tránh ghi đè dữ liệu bị mã hóa độc hại lên các bản sao lưu an toàn trước đó!",
+                            "Chặn Sao Lưu - Phòng Chống Ransomware AI",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Stop);
+                        AddHistory(isFull ? "Full" : "Incremental", "Chặn bởi AI Ransomware");
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine("AI scan error: " + ex.Message);
+                }
 
                 progressBar1.Value = 0;
                 lblStatus.Text = "Đang sao lưu...";
@@ -590,11 +612,7 @@ namespace SecureDataBackupSystem
         }
         private void btnRestore_Click(object sender, EventArgs e)
         {
-            string folder = System.IO.Path.Combine(
-                Environment.GetFolderPath(
-                    Environment.SpecialFolder.MyDocuments),
-                "SecureDataBackup"
-            );
+            string folder = BackupSystem.Shared.Models.BackupPaths.GetBackupRoot();
 
             if (!System.IO.Directory.Exists(folder))
             {
@@ -761,11 +779,7 @@ namespace SecureDataBackupSystem
         private async void btnRestoreFolder_Click(object sender, EventArgs e)
         {
 
-            string backupRoot = System.IO.Path.Combine(
-                Environment.GetFolderPath(
-                    Environment.SpecialFolder.MyDocuments),
-                "SecureDataBackup"
-            );
+            string backupRoot = BackupSystem.Shared.Models.BackupPaths.GetBackupRoot();
             if (!System.IO.Directory.Exists(backupRoot))
             {
                 MessageBox.Show("Chưa có dữ liệu sao lưu!");
@@ -1050,6 +1064,12 @@ namespace SecureDataBackupSystem
             MessageBox.Show("Đã bật theo dõi thư mục!");
 
         }
+        // Sự kiện thông báo thay đổi Real-time sang FormSettings
+        public event Action<string> MonitoringEventDetected;
+        private string _monitoredPath = string.Empty;
+        private string _lastMonitorKey = string.Empty;
+        private DateTime _lastMonitorUtc = DateTime.MinValue;
+
         // Hàm tắt theo dõi file hoặc thư mục
         public void StopFolderMonitoring()
         {
@@ -1061,6 +1081,23 @@ namespace SecureDataBackupSystem
         public void StartFolderMonitoring(string path)
         {
             fileSystemWatcher1.EnableRaisingEvents = false;  // Tạm dừng theo dõi trước khi cấu hình
+            _monitoredPath = path;
+
+            // Đảm bảo Handle tồn tại ngay cả khi tab Sao lưu chưa được mở
+            if (!this.IsHandleCreated)
+            {
+                var unused = this.Handle;
+            }
+
+            fileSystemWatcher1.Created -= FileChanged;
+            fileSystemWatcher1.Changed -= FileChanged;
+            fileSystemWatcher1.Deleted -= FileChanged;
+            fileSystemWatcher1.Renamed -= FileRenamed;
+
+            fileSystemWatcher1.Created += FileChanged;
+            fileSystemWatcher1.Changed += FileChanged;
+            fileSystemWatcher1.Deleted += FileChanged;
+            fileSystemWatcher1.Renamed += FileRenamed;
 
             // Kiểm tra người dùng chọn một file
             if (System.IO.File.Exists(path))
@@ -1100,35 +1137,88 @@ namespace SecureDataBackupSystem
             lblStatus.Text = "Đang theo dõi: " + path;   // Cập nhật trạng thái
         }
 
+        private void FileRenamed(object sender, System.IO.RenamedEventArgs e)
+        {
+            HandleWatcherEvent("Đã đổi tên", e.FullPath);
+        }
+
         private void FileChanged(
             object sender,
             System.IO.FileSystemEventArgs e)
         {
-            if (this.IsDisposed || !this.IsHandleCreated)
+            string action = "Đã thay đổi";
+            if (e.ChangeType == System.IO.WatcherChangeTypes.Created)
+                action = "Đã thêm";
+            else if (e.ChangeType == System.IO.WatcherChangeTypes.Changed)
+                action = "Đã sửa";
+            else if (e.ChangeType == System.IO.WatcherChangeTypes.Deleted)
+                action = "Đã xóa";
+
+            HandleWatcherEvent(action, e.FullPath);
+        }
+
+        private void HandleWatcherEvent(string action, string fullPath)
+        {
+            if (this.IsDisposed)
                 return;
+
+            string fileName = System.IO.Path.GetFileName(fullPath);
+            if (string.IsNullOrEmpty(fileName) || fileName.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            // Chống lặp sự kiện trong vòng 800ms cho cùng 1 file & hành động
+            string key = action + "|" + fullPath;
+            DateTime now = DateTime.UtcNow;
+            if (key == _lastMonitorKey && (now - _lastMonitorUtc).TotalMilliseconds < 800)
+                return;
+            _lastMonitorKey = key;
+            _lastMonitorUtc = now;
+
+            string statusMsg = action + ": " + fileName;
 
             try
             {
-                this.BeginInvoke(new Action(() =>
+                Action uiAction = () =>
                 {
-                    string action = "";
+                    lblStatus.Text = statusMsg;
+                    // Ghi vào Lịch sử để kiểm tra được ngay ở tab Lịch sử
+                    string time = DateTime.Now.ToString("dd/MM/yyyy HH:mm:ss");
+                    dgvHistory.Rows.Add(time, "Theo dõi Real-time", fullPath, action);
+                    try
+                    {
+                        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(historyPath));
+                        string line = string.Join("\t", time, "Theo dõi Real-time", fullPath, action);
+                        System.IO.File.AppendAllText(historyPath, line + Environment.NewLine);
+                    }
+                    catch { }
 
-                    if (e.ChangeType == System.IO.WatcherChangeTypes.Created)
-                        action = "Đã thêm";
+                    // Nếu thêm hoặc sửa file và không vướng mật khẩu trống, tự động backup file đó sang SecureDataBackup
+                    if ((action == "Đã thêm" || action == "Đã sửa") && System.IO.File.Exists(fullPath))
+                    {
+                        try
+                        {
+                            string backupRoot = BackupSystem.Shared.Models.BackupPaths.GetBackupRoot();
+                            string destFolder = System.IO.Directory.Exists(_monitoredPath)
+                                ? System.IO.Path.Combine(backupRoot, new System.IO.DirectoryInfo(_monitoredPath).Name)
+                                : backupRoot;
+                            System.IO.Directory.CreateDirectory(destFolder);
+                            string destFile = System.IO.Path.Combine(destFolder, fileName);
+                            System.IO.File.Copy(fullPath, destFile, true);
+                        }
+                        catch { }
+                    }
+                };
 
-                    else if (e.ChangeType == System.IO.WatcherChangeTypes.Changed)
-                        action = "Đã sửa";
-
-                    else if (e.ChangeType == System.IO.WatcherChangeTypes.Deleted)
-                        action = "Đã xóa";
-
-                    lblStatus.Text = action + ": " +
-                        System.IO.Path.GetFileName(e.FullPath);
-                }));
+                if (this.IsHandleCreated)
+                    this.BeginInvoke(uiAction);
+                else
+                    uiAction();
             }
             catch (InvalidOperationException)
             {
             }
+
+            MonitoringEventDetected?.Invoke(statusMsg);
         }
 
         private void txtFile_TextChanged(object sender, EventArgs e)

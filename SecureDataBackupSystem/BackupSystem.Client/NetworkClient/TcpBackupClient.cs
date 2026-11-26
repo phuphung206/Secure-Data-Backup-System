@@ -316,6 +316,129 @@ namespace BackupSystem.Client.NetworkClient
         }
 
         /// <summary>
+        /// Khôi phục (tải) file từ Server về Client qua TCP Socket theo cơ chế Chunking và xác thực SHA-256.
+        /// </summary>
+        public async Task<bool> DownloadFileAsync(
+            string backupId,
+            string relativePath,
+            string localDestinationPath,
+            IProgress<TransferProgressReport>? progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (!IsConnected || _networkStream == null)
+                throw new InvalidOperationException("Chưa kết nối tới Backup Server.");
+
+            Log($"[RESTORE] Bắt đầu yêu cầu file '{relativePath}' từ backup '{backupId}'...");
+
+            var req = new RestoreInitRequestPayload
+            {
+                BackupId = backupId,
+                RelativePath = relativePath
+            };
+
+            byte[] reqBytes = PacketSerializationHelper.SerializeJson(req);
+            await SendPacketAsync(new NetworkPacket(PacketType.RestoreInitRequest, reqBytes), cancellationToken).ConfigureAwait(false);
+
+            var initRespPacket = await ReceivePacketAsync(cancellationToken).ConfigureAwait(false);
+            if (initRespPacket == null || initRespPacket.Type != PacketType.RestoreInitResponse)
+            {
+                throw new InvalidOperationException("Không nhận được phản hồi khởi tạo Restore từ Server.");
+            }
+
+            var initResp = PacketSerializationHelper.DeserializeJson<RestoreInitResponsePayload>(initRespPacket.Payload);
+            if (initResp == null || !initResp.FileExists)
+            {
+                throw new FileNotFoundException($"File '{relativePath}' không tồn tại trên Server.", relativePath);
+            }
+
+            long totalBytes = initResp.TotalBytes;
+            int totalChunks = initResp.TotalChunks;
+            string transferId = initResp.TransferId;
+            string expectedSha256 = initResp.FileSha256;
+
+            Log($"[RESTORE] File tồn tại ({TransferProgressReport.FormatBytes(totalBytes)}, {totalChunks} chunks). Bắt đầu nhận...");
+
+            using (var assembler = new FileAssembler(transferId, localDestinationPath, totalBytes, totalChunks, expectedSha256))
+            {
+                long bytesReceived = 0;
+                var speedStopwatch = Stopwatch.StartNew();
+                long lastReportBytes = 0;
+
+                for (int i = 0; i < totalChunks; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var chunkReq = new RestoreChunkRequestPayload
+                    {
+                        TransferId = transferId,
+                        ChunkIndex = i
+                    };
+
+                    byte[] chunkReqBytes = PacketSerializationHelper.SerializeJson(chunkReq);
+                    await SendPacketAsync(new NetworkPacket(PacketType.RestoreChunkRequest, chunkReqBytes), cancellationToken).ConfigureAwait(false);
+
+                    var chunkDataPacket = await ReceivePacketAsync(cancellationToken).ConfigureAwait(false);
+                    if (chunkDataPacket == null || chunkDataPacket.Type != PacketType.RestoreChunkData)
+                    {
+                        throw new IOException($"Không nhận được chunk {i} từ Server.");
+                    }
+
+                    var chunk = PacketSerializationHelper.UnpackFileChunk(chunkDataPacket.Payload);
+                    assembler.WriteChunk(chunk);
+
+                    bytesReceived += chunk.Length;
+
+                    double speedElapsedSec = speedStopwatch.Elapsed.TotalSeconds;
+                    double speed = 0;
+                    if (speedElapsedSec >= 0.2 || i == totalChunks - 1)
+                    {
+                        long delta = bytesReceived - lastReportBytes;
+                        speed = delta / Math.Max(0.001, speedElapsedSec);
+                        lastReportBytes = bytesReceived;
+                        speedStopwatch.Restart();
+                    }
+
+                    int percent = totalBytes > 0 ? (int)((bytesReceived * 100) / totalBytes) : 100;
+                    progress?.Report(new TransferProgressReport
+                    {
+                        TransferId = transferId,
+                        FileName = Path.GetFileName(localDestinationPath),
+                        RelativePath = relativePath,
+                        CurrentChunk = i + 1,
+                        TotalChunks = totalChunks,
+                        BytesTransferred = bytesReceived,
+                        TotalBytes = totalBytes,
+                        ProgressPercentage = percent,
+                        TransferSpeedBytesPerSec = speed,
+                        StatusMessage = $"Đang nhận gói {i + 1}/{totalChunks} ({percent}%)..."
+                    });
+                }
+
+                Log($"[RESTORE] Đã nhận đủ {totalChunks} chunks. Đang xác thực SHA-256...");
+                string actualSha = assembler.FinalizeAndVerify();
+
+                string shortSha = !string.IsNullOrEmpty(actualSha) ? actualSha.Substring(0, Math.Min(8, actualSha.Length)) : "";
+                Log($"[RESTORE THÀNH CÔNG] File đã khôi phục nguyên vẹn tại: {localDestinationPath} (SHA-256: {shortSha}...)");
+
+                progress?.Report(new TransferProgressReport
+                {
+                    TransferId = transferId,
+                    FileName = Path.GetFileName(localDestinationPath),
+                    RelativePath = relativePath,
+                    CurrentChunk = totalChunks,
+                    TotalChunks = totalChunks,
+                    BytesTransferred = totalBytes,
+                    TotalBytes = totalBytes,
+                    ProgressPercentage = 100,
+                    IsCompleted = true,
+                    StatusMessage = "Khôi phục thành công 100%!"
+                });
+
+                return true;
+            }
+        }
+
+        /// <summary>
         /// Gửi gói tin an toàn luồng qua NetworkStream.
         /// </summary>
         public async Task SendPacketAsync(NetworkPacket packet, CancellationToken cancellationToken = default)

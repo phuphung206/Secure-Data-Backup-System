@@ -22,6 +22,8 @@ namespace BackupSystem.Server.NetworkServer
         private readonly ServerStorageManager _storageManager;
         private readonly SemaphoreSlim _sendLock = new SemaphoreSlim(1, 1);
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string FilePath, int ChunkSize)> _activeRestoreFiles =
+            new System.Collections.Concurrent.ConcurrentDictionary<string, (string FilePath, int ChunkSize)>(StringComparer.OrdinalIgnoreCase);
         private bool _isDisposed;
 
         public string SessionId { get; } = Guid.NewGuid().ToString("N");
@@ -218,6 +220,19 @@ namespace BackupSystem.Server.NetworkServer
             Log($"[RESTORE INIT] Yêu cầu khôi phục file '{req.RelativePath}' từ Backup '{req.BackupId}'.");
             var resp = _storageManager.GetFileForRestore(req.BackupId, req.RelativePath, NetworkProtocolConstants.DefaultChunkSize);
 
+            if (resp.FileExists)
+            {
+                string? physicalPath = _storageManager.GetPhysicalFilePath(req.BackupId, req.RelativePath);
+                if (physicalPath != null)
+                {
+                    _activeRestoreFiles[resp.TransferId] = (physicalPath, resp.ChunkSize);
+                }
+            }
+            else
+            {
+                Log($"[RESTORE THẤT BẠI] Không tìm thấy file '{req.RelativePath}' trong Backup '{req.BackupId}'.");
+            }
+
             byte[] respBytes = PacketSerializationHelper.SerializeJson(resp);
             await SendPacketAsync(new NetworkPacket(PacketType.RestoreInitResponse, respBytes)).ConfigureAwait(false);
         }
@@ -227,8 +242,37 @@ namespace BackupSystem.Server.NetworkServer
             var req = PacketSerializationHelper.DeserializeJson<RestoreChunkRequestPayload>(packet.Payload);
             if (req == null) return;
 
-            // Xử lý gửi chunk file về cho Client
-            // Trong ứng dụng Restore, Client yêu cầu từng chunk theo chỉ số
+            if (!_activeRestoreFiles.TryGetValue(req.TransferId, out var fileInfo) || !File.Exists(fileInfo.FilePath))
+            {
+                await SendPacketAsync(NetworkPacket.CreateError($"Không tìm thấy phiên restore {req.TransferId}.")).ConfigureAwait(false);
+                return;
+            }
+
+            int chunkSize = fileInfo.ChunkSize > 0 ? fileInfo.ChunkSize : NetworkProtocolConstants.DefaultChunkSize;
+            long offset = (long)req.ChunkIndex * chunkSize;
+            var file = new FileInfo(fileInfo.FilePath);
+            int totalChunks = FileChunker.CalculateTotalChunks(file.Length, chunkSize);
+
+            byte[] buffer = new byte[chunkSize];
+            int bytesRead;
+
+            using (var fs = new FileStream(fileInfo.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                fs.Seek(offset, SeekOrigin.Begin);
+                bytesRead = fs.Read(buffer, 0, chunkSize);
+            }
+
+            byte[] chunkData = new byte[bytesRead];
+            Buffer.BlockCopy(buffer, 0, chunkData, 0, bytesRead);
+
+            var chunk = new FileChunk(req.TransferId, req.ChunkIndex, totalChunks, offset, chunkData);
+            byte[] packed = PacketSerializationHelper.PackFileChunk(chunk);
+            await SendPacketAsync(new NetworkPacket(PacketType.RestoreChunkData, packed)).ConfigureAwait(false);
+
+            if (req.ChunkIndex + 1 >= totalChunks)
+            {
+                Log($"[KHÔI PHỤC THÀNH CÔNG] Đã truyền trả file '{Path.GetFileName(fileInfo.FilePath)}' ({totalChunks} chunks, {TransferProgressReport.FormatBytes(file.Length)}) về Client {RemoteEndPoint}!");
+            }
         }
 
         #endregion

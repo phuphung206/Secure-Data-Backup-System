@@ -5,9 +5,7 @@ namespace SecureDataBackupSystem
 {
     public static class BackupService
     {
-        private static readonly string backupRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-            "SecureDataBackup");
+        private static readonly string backupRoot = BackupSystem.Shared.Models.BackupPaths.GetBackupRoot();
 
         // Hàm thực hiện Full Backup theo lịch
         public static void RunScheduledBackup(string sourcePath)
@@ -45,9 +43,8 @@ namespace SecureDataBackupSystem
                 throw new Exception("Nguồn và đích trùng nhau!");
             }
 
-            // Tác vụ theo lịch phải dùng khóa đã tạo cho tài khoản Windows này.
-            // Kiểm tra khóa trước khi tạo thư mục đích sao lưu.
-            KeyProtectionService.UseExistingKey(key => true);
+            // Tự động dùng khóa DPAPI hiện có hoặc tạo mới nếu tài khoản Windows này chưa có khóa.
+            KeyProtectionService.UseOrCreateKey(key => true);
 
             BackupPipeline.Run(
                 sourcePath,

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -28,6 +28,26 @@ namespace SecureDataBackupSystem
             // Gắn sự kiện khi kéo và thả vào ô theo dõi
             txtFolderPath.DragEnter += Path_DragEnter;
             txtFolderPath.DragDrop += Path_DragDrop;
+
+            if (backupForm != null)
+            {
+                backupForm.MonitoringEventDetected += BackupForm_MonitoringEventDetected;
+            }
+        }
+
+        private void BackupForm_MonitoringEventDetected(string message)
+        {
+            if (this.IsDisposed || !this.IsHandleCreated)
+                return;
+
+            try
+            {
+                this.BeginInvoke(new Action(() =>
+                {
+                    lblStatus.Text = "[Real-time] " + message + " (Đã cập nhật vào Lịch sử & Sao lưu)";
+                }));
+            }
+            catch { }
         }
         // Kiểm tra dữ liệu đang kéo vào có phải file hoặc thư mục không
         private void Path_DragEnter(object sender, DragEventArgs e)

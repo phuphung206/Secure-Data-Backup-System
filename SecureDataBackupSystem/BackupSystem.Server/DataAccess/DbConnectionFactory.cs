@@ -8,7 +8,7 @@ namespace BackupSystem.Server.DataAccess
 {
     public static class DbConnectionFactory
     {
-        public static readonly string ServerDataRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ServerDataRoot");
+        public static readonly string ServerDataRoot = BackupSystem.Shared.Models.BackupPaths.GetBackupRoot();
         public static readonly string DbDirectory = Path.Combine(ServerDataRoot, "Database");
         public static readonly string DbFilePath = Path.Combine(DbDirectory, "BackupServer.sqlite");
         private static readonly string ConnectionString = $"Data Source={DbFilePath}";

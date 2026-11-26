@@ -25,7 +25,7 @@ namespace BackupSystem.Server.StorageManager
         {
             _storageRoot = !string.IsNullOrWhiteSpace(storageRoot)
                 ? Path.GetFullPath(storageRoot)
-                : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ServerStorage");
+                : BackupPaths.GetBackupRoot();
 
             _assemblingRoot = Path.Combine(_storageRoot, ".assembling");
             _backupStoreRoot = Path.Combine(_storageRoot, "BackupStore");

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -31,12 +31,7 @@ namespace SecureDataBackupSystem
         }
 
 
-        private string historyPath = System.IO.Path.Combine(
-            Environment.GetFolderPath(
-                Environment.SpecialFolder.MyDocuments),
-            "SecureDataBackup",
-            "backup_history.txt"
-        );
+        private string historyPath = BackupSystem.Shared.Models.BackupPaths.GetHistoryFilePath();
 
 
         /// <summary>
