@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace BackupSystem.Shared.Models
 {
@@ -44,6 +45,25 @@ namespace BackupSystem.Shared.Models
         public bool IsSuccess { get; set; }
         public string ClientComputedSha256 { get; set; } = string.Empty;
         public string Message { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Thông tin một file đã sao lưu trên Server dùng để hiển thị danh sách khôi phục từ xa.
+    /// </summary>
+    public sealed class RemoteBackupFileEntry
+    {
+        public string BackupId { get; set; } = string.Empty;
+        public string RelativePath { get; set; } = string.Empty;
+        public long FileSize { get; set; }
+        public DateTime LastModifiedUtc { get; set; }
+    }
+
+    /// <summary>
+    /// Danh sách các file sao lưu hiện có trên Server.
+    /// </summary>
+    public sealed class RestoreListResponsePayload
+    {
+        public List<RemoteBackupFileEntry> Files { get; set; } = new List<RemoteBackupFileEntry>();
     }
 }
 

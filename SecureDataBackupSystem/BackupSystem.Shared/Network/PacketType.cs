@@ -29,6 +29,8 @@ namespace BackupSystem.Shared.Network
         RestoreChunkRequest = 0x32,     // Client yêu cầu chunk cụ thể
         RestoreChunkData = 0x33,        // Server gửi chunk data cho Client
         RestoreCompleteAck = 0x34,      // Client xác nhận đã nhận đủ và kiểm tra SHA-256 khớp
+        RestoreListRequest = 0x35,      // Client yêu cầu danh sách file backup trên Server
+        RestoreListResponse = 0x36,     // Server trả danh sách file backup hiện có
 
         // 0x50 - 0x5F: Đồng bộ Danh mục & Manifest (Manifest Sync)
         ManifestUploadRequest = 0x50,
