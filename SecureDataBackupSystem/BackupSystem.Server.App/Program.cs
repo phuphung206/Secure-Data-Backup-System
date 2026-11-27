@@ -47,7 +47,6 @@ namespace BackupSystem.Server.App
             Console.WriteLine(@"
 ========================================================================
        🛡️ SECURE DATA BACKUP SYSTEM - TCP BACKUP SERVER 🛡️
-    [TV3 — Network & Concurrency: TCP Sockets & Chunking Engine]
 ========================================================================");
             Console.ResetColor();
 
