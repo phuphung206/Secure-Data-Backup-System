@@ -22,6 +22,10 @@ namespace BackupSystem.Shared.Network
         FileChunkAck = 0x13,            // Server xác nhận đã nhận chunk an toàn
         BackupCompleteRequest = 0x14,   // Client thông báo đã gửi hết chunks, yêu cầu ráp & kiểm tra SHA-256
         BackupCompleteResponse = 0x15,  // Server trả kết quả kiểm tra toàn vẹn và lưu trữ
+        BackupSessionStartRequest = 0x16,  // Mở một phiên bản (Version) backup mới trên Server
+        BackupSessionStartResponse = 0x17, // Server trả VersionId + danh sách file của phiên bản trước
+        BackupSessionEndRequest = 0x18,    // Đóng phiên bản: gửi danh sách file hiện có để Server dựng snapshot
+        BackupSessionEndResponse = 0x19,
 
         // 0x30 - 0x4F: Quá trình Phục hồi (Restore Flow)
         RestoreInitRequest = 0x30,      // Client yêu cầu restore file theo BackupId/RelativePath
@@ -31,6 +35,10 @@ namespace BackupSystem.Shared.Network
         RestoreCompleteAck = 0x34,      // Client xác nhận đã nhận đủ và kiểm tra SHA-256 khớp
         RestoreListRequest = 0x35,      // Client yêu cầu danh sách file backup trên Server
         RestoreListResponse = 0x36,     // Server trả danh sách file backup hiện có
+        VersionListRequest = 0x37,      // Client yêu cầu lịch sử các phiên bản backup của người dùng
+        VersionListResponse = 0x38,
+        VersionFilesRequest = 0x39,     // Client yêu cầu danh sách file (snapshot) của một phiên bản
+        VersionFilesResponse = 0x3A,
 
         // 0x50 - 0x5F: Đồng bộ Danh mục & Manifest (Manifest Sync)
         ManifestUploadRequest = 0x50,

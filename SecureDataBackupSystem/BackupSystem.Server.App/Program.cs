@@ -11,7 +11,34 @@ namespace BackupSystem.Server.App
 {
     internal class Program
     {
-        private static async Task Main(string[] args)
+        private static int RunUserCommand(string[] args)
+        {
+            string storage = args.Length > 3 ? Path.GetFullPath(args[3]) : BackupPaths.GetBackupRoot();
+            var metadata = new BackupSystem.Server.DataAccess.BackupMetadataService(
+                BackupSystem.Server.DataAccess.DbConnectionFactory.GetDbFilePathForStorage(storage));
+            try
+            {
+                metadata.Initialize();
+                if (args[0].Equals("adduser", StringComparison.OrdinalIgnoreCase))
+                {
+                    int id = metadata.Users.CreateUser(args[1], args[2]);
+                    Console.WriteLine($"Đã tạo tài khoản '{args[1]}' (UserId={id}) trong {metadata.DbFilePath}.");
+                }
+                else
+                {
+                    metadata.Users.ChangePassword(args[1], args[2]);
+                    Console.WriteLine($"Đã đổi mật khẩu tài khoản '{args[1]}'.");
+                }
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Lỗi: " + ex.Message);
+                return 1;
+            }
+        }
+
+        private static async Task<int> Main(string[] args)
         {
             Console.OutputEncoding = Encoding.UTF8;
             Console.Title = "Secure Data Backup Server (TCP Socket)";
@@ -23,6 +50,16 @@ namespace BackupSystem.Server.App
     [TV3 — Network & Concurrency: TCP Sockets & Chunking Engine]
 ========================================================================");
             Console.ResetColor();
+
+            // Quản lý tài khoản người dùng trên Server:
+            //   BackupSystem.Server.App adduser <tên> <mật khẩu> [thư mục lưu trữ]
+            //   BackupSystem.Server.App passwd  <tên> <mật khẩu mới> [thư mục lưu trữ]
+            if (args.Length >= 3 &&
+                (args[0].Equals("adduser", StringComparison.OrdinalIgnoreCase) ||
+                 args[0].Equals("passwd", StringComparison.OrdinalIgnoreCase)))
+            {
+                return RunUserCommand(args);
+            }
 
             int port = NetworkProtocolConstants.DefaultPort;
             if (args.Length > 0 && int.TryParse(args[0], out int customPort))
@@ -40,18 +77,19 @@ namespace BackupSystem.Server.App
             Console.WriteLine($"[CẤU HÌNH] Kho lưu trữ : {storageDir}");
             Console.WriteLine($"[CẤU HÌNH] Kích thước chunk mặc định: {NetworkProtocolConstants.DefaultChunkSize / 1024} KB\n");
 
-            try
-            {
-                BackupSystem.Server.DataAccess.DbConnectionFactory.InitializeDatabase();
-                Console.WriteLine($"[CƠ SỞ DỮ LIỆU] SQLite Database đã sẵn sàng: {BackupSystem.Server.DataAccess.DbConnectionFactory.DbFilePath}\n");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[CẢNH BÁO DB] Chưa thể khởi tạo SQLite Database: {ex.Message}\n");
-            }
-
             using (var server = new TcpBackupServer(storageDir))
             {
+                try
+                {
+                    var metadata = server.InitializeMetadata();
+                    Console.WriteLine($"[CƠ SỞ DỮ LIỆU] SQLite Metadata đã sẵn sàng: {metadata.DbFilePath}");
+                    Console.WriteLine("[TÀI KHOẢN] Mặc định: admin / 123456 (tạo thêm: BackupSystem.Server.App adduser <tên> <mật khẩu>)\n");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[CẢNH BÁO DB] Chưa thể khởi tạo SQLite Database: {ex.Message}\n");
+                }
+
                 server.OnLog += (msg) =>
                 {
                     Console.ForegroundColor = ConsoleColor.Gray;
@@ -139,6 +177,7 @@ namespace BackupSystem.Server.App
             }
 
             Console.WriteLine("Server đã đóng an toàn. Tạm biệt!");
+            return 0;
         }
     }
 }

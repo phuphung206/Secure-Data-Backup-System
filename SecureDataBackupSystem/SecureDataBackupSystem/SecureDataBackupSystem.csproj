@@ -93,6 +93,10 @@
     <Compile Include="BackupFileEncryptionService.cs" />
     <Compile Include="EncryptionService.cs" />
     <Compile Include="KeyProtectionService.cs" />
+    <Compile Include="ClientSettingsStore.cs" />
+    <Compile Include="FormVersionRestore.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="FormBackup.cs">
       <SubType>Form</SubType>
     </Compile>

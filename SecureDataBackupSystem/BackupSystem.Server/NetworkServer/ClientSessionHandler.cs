@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using BackupSystem.Server.DataAccess;
 using BackupSystem.Server.StorageManager;
 using BackupSystem.Shared.Chunking;
 using BackupSystem.Shared.Models;
@@ -20,6 +21,13 @@ namespace BackupSystem.Server.NetworkServer
         private readonly TcpClient _tcpClient;
         private readonly NetworkStream _networkStream;
         private readonly ServerStorageManager _storageManager;
+        private readonly BackupMetadataService? _metadata;
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, BackupInitPayload> _pendingTransfers =
+            new System.Collections.Concurrent.ConcurrentDictionary<string, BackupInitPayload>(StringComparer.OrdinalIgnoreCase);
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<int, string> _openVersions =
+            new System.Collections.Concurrent.ConcurrentDictionary<int, string>();
+        private int? _userId;
+        private string _username = string.Empty;
         private readonly SemaphoreSlim _sendLock = new SemaphoreSlim(1, 1);
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string FilePath, int ChunkSize)> _activeRestoreFiles =
@@ -37,10 +45,14 @@ namespace BackupSystem.Server.NetworkServer
         public event Action<ClientSessionHandler, string, int, int>? OnChunkReceived;
         public event Action<ClientSessionHandler, string, bool, string>? OnTransferCompleted;
 
-        public ClientSessionHandler(TcpClient tcpClient, ServerStorageManager storageManager)
+        public bool IsAuthenticated => _userId.HasValue;
+        public string Username => _username;
+
+        public ClientSessionHandler(TcpClient tcpClient, ServerStorageManager storageManager, BackupMetadataService? metadata = null)
         {
             _tcpClient = tcpClient ?? throw new ArgumentNullException(nameof(tcpClient));
             _storageManager = storageManager ?? throw new ArgumentNullException(nameof(storageManager));
+            _metadata = metadata;
             _networkStream = _tcpClient.GetStream();
             RemoteEndPoint = _tcpClient.Client.RemoteEndPoint?.ToString() ?? "Unknown";
         }
@@ -92,6 +104,26 @@ namespace BackupSystem.Server.NetworkServer
             {
                 case PacketType.HandshakeRequest:
                     await HandleHandshakeAsync(packet).ConfigureAwait(false);
+                    break;
+
+                case PacketType.AuthRequest:
+                    await HandleAuthAsync(packet).ConfigureAwait(false);
+                    break;
+
+                case PacketType.BackupSessionStartRequest:
+                    await HandleSessionStartAsync(packet).ConfigureAwait(false);
+                    break;
+
+                case PacketType.BackupSessionEndRequest:
+                    await HandleSessionEndAsync(packet).ConfigureAwait(false);
+                    break;
+
+                case PacketType.VersionListRequest:
+                    await HandleVersionListAsync(packet).ConfigureAwait(false);
+                    break;
+
+                case PacketType.VersionFilesRequest:
+                    await HandleVersionFilesAsync(packet).ConfigureAwait(false);
                     break;
 
                 case PacketType.HeartbeatPing:
@@ -168,7 +200,28 @@ namespace BackupSystem.Server.NetworkServer
             Log($"[BACKUP INIT] Bắt đầu nhận file: '{initPayload.RelativePath}' ({TransferProgressReport.FormatBytes(initPayload.TotalBytes)}, {initPayload.TotalChunks} chunks, SHA-256: {shortSha}...).");
             OnTransferStarted?.Invoke(this, initPayload);
 
-            var resp = _storageManager.InitTransfer(initPayload);
+            BackupInitResponsePayload resp;
+            if (initPayload.VersionId > 0 &&
+                (!_userId.HasValue ||
+                 !_openVersions.TryGetValue(initPayload.VersionId, out string? openBackupId) ||
+                 !string.Equals(openBackupId, initPayload.BackupId, StringComparison.Ordinal)))
+            {
+                resp = new BackupInitResponsePayload
+                {
+                    TransferId = initPayload.TransferId,
+                    IsAccepted = false,
+                    Message = $"Phiên bản #{initPayload.VersionId} chưa được mở trong phiên đăng nhập này."
+                };
+            }
+            else
+            {
+                resp = _storageManager.InitTransfer(initPayload);
+                if (resp.IsAccepted)
+                    _pendingTransfers[initPayload.TransferId] = initPayload;
+                else
+                    Log($"[TỪ CHỐI] {resp.Message}");
+            }
+
             byte[] respBytes = PacketSerializationHelper.SerializeJson(resp);
             await SendPacketAsync(new NetworkPacket(PacketType.BackupInitResponse, respBytes)).ConfigureAwait(false);
         }
@@ -197,6 +250,16 @@ namespace BackupSystem.Server.NetworkServer
             Log($"[BACKUP COMPLETE] Đang tiến hành kiểm tra toàn vẹn SHA-256 cho TransferId: {shortTid}...");
             var resp = _storageManager.CompleteTransfer(compPayload);
 
+            if (_pendingTransfers.TryRemove(compPayload.TransferId, out var initInfo) &&
+                resp.IsSuccess && initInfo.VersionId > 0 && _metadata != null && _userId.HasValue)
+            {
+                if (!_metadata.RecordUploadedFile(_userId.Value, initInfo, resp.StoredFilePath, resp.FinalSizeBytes, out string metaError))
+                {
+                    resp.IsSuccess = false;
+                    resp.Message = "Đã lưu file nhưng không ghi được metadata phiên bản: " + metaError;
+                }
+            }
+
             OnTransferCompleted?.Invoke(this, compPayload.TransferId, resp.IsSuccess, resp.Message);
 
             if (resp.IsSuccess)
@@ -221,20 +284,68 @@ namespace BackupSystem.Server.NetworkServer
                 return;
             }
 
-            Log($"[RESTORE INIT] Yêu cầu khôi phục file '{req.RelativePath}' từ Backup '{req.BackupId}'.");
-            var resp = _storageManager.GetFileForRestore(req.BackupId, req.RelativePath, NetworkProtocolConstants.DefaultChunkSize);
+            RestoreInitResponsePayload resp;
+            string? physicalPath = null;
 
-            if (resp.FileExists)
+            if (req.VersionId > 0)
             {
-                string? physicalPath = _storageManager.GetPhysicalFilePath(req.BackupId, req.RelativePath);
-                if (physicalPath != null)
+                // Khôi phục theo phiên bản: tra cứu metadata, chỉ cho phép phiên bản thuộc tài khoản đã đăng nhập
+                Log($"[RESTORE INIT] Yêu cầu khôi phục '{req.RelativePath}' tại phiên bản #{req.VersionId}.");
+                var meta = (_metadata != null && _userId.HasValue)
+                    ? _metadata.ResolveFileForRestore(_userId.Value, req.VersionId, req.RelativePath)
+                    : null;
+
+                if (meta == null)
                 {
-                    _activeRestoreFiles[resp.TransferId] = (physicalPath, resp.ChunkSize);
+                    resp = new RestoreInitResponsePayload
+                    {
+                        FileExists = false,
+                        RelativePath = req.RelativePath,
+                        Message = _userId.HasValue
+                            ? $"Không tìm thấy '{req.RelativePath}' trong phiên bản #{req.VersionId}."
+                            : "Cần đăng nhập để khôi phục theo phiên bản."
+                    };
                 }
+                else
+                {
+                    resp = _storageManager.GetFileForRestoreByPhysicalPath(meta.ServerPhysicalPath, req.RelativePath, NetworkProtocolConstants.DefaultChunkSize);
+                    resp.IsEncrypted = meta.IsEncrypted;
+                    resp.IsCompressed = meta.IsCompressed;
+                    resp.OriginalSha256 = meta.Sha256Hash;
+                    if (resp.FileExists)
+                        physicalPath = meta.ServerPhysicalPath;
+                    _metadata!.LogRestore(_userId!.Value, req.VersionId, "SINGLE_FILE", req.RelativePath, resp.FileExists);
+                }
+            }
+            else if (!CanAccessBackupId(req.BackupId))
+            {
+                resp = new RestoreInitResponsePayload
+                {
+                    FileExists = false,
+                    RelativePath = req.RelativePath,
+                    Message = _userId.HasValue
+                        ? $"Bản backup '{req.BackupId}' không thuộc tài khoản hiện tại."
+                        : "Cần đăng nhập để khôi phục dữ liệu từ Server."
+                };
             }
             else
             {
-                Log($"[RESTORE THẤT BẠI] Không tìm thấy file '{req.RelativePath}' trong Backup '{req.BackupId}'.");
+                Log($"[RESTORE INIT] Yêu cầu khôi phục file '{req.RelativePath}' từ Backup '{req.BackupId}'.");
+                resp = _storageManager.GetFileForRestore(req.BackupId, req.RelativePath, NetworkProtocolConstants.DefaultChunkSize);
+                if (resp.FileExists)
+                {
+                    physicalPath = _storageManager.GetPhysicalFilePath(req.BackupId, req.RelativePath);
+                    resp.IsEncrypted = req.RelativePath.EndsWith(".enc", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+
+            if (resp.FileExists && physicalPath != null)
+            {
+                _activeRestoreFiles[resp.TransferId] = (physicalPath, resp.ChunkSize);
+            }
+            else
+            {
+                Log($"[RESTORE THẤT BẠI] {resp.Message}");
             }
 
             byte[] respBytes = PacketSerializationHelper.SerializeJson(resp);
@@ -257,6 +368,12 @@ namespace BackupSystem.Server.NetworkServer
             var file = new FileInfo(fileInfo.FilePath);
             int totalChunks = FileChunker.CalculateTotalChunks(file.Length, chunkSize);
 
+            if (req.ChunkIndex < 0 || (req.ChunkIndex >= totalChunks && !(totalChunks == 0 && req.ChunkIndex == 0)))
+            {
+                await SendPacketAsync(NetworkPacket.CreateError($"Chỉ số chunk {req.ChunkIndex} không hợp lệ.")).ConfigureAwait(false);
+                return;
+            }
+
             byte[] buffer = new byte[chunkSize];
             int bytesRead;
 
@@ -275,17 +392,159 @@ namespace BackupSystem.Server.NetworkServer
 
             if (req.ChunkIndex + 1 >= totalChunks)
             {
+                _activeRestoreFiles.TryRemove(req.TransferId, out _);
                 Log($"[KHÔI PHỤC THÀNH CÔNG] Đã truyền trả file '{Path.GetFileName(fileInfo.FilePath)}' ({totalChunks} chunks, {TransferProgressReport.FormatBytes(file.Length)}) về Client {RemoteEndPoint}!");
             }
         }
 
         private async Task HandleRestoreListAsync()
         {
-            var files = _storageManager.ListBackupFiles();
+            // Chỉ liệt kê các bản backup thuộc tài khoản đã đăng nhập (không lộ dữ liệu của người dùng khác)
+            var files = new System.Collections.Generic.List<RemoteBackupFileEntry>();
+            if (_metadata != null && _userId.HasValue)
+            {
+                var owned = _metadata.GetOwnedBackupIds(_userId.Value);
+                foreach (var entry in _storageManager.ListBackupFiles())
+                {
+                    if (owned.Contains(entry.BackupId))
+                        files.Add(entry);
+                }
+            }
             var resp = new RestoreListResponsePayload { Files = files };
             byte[] respBytes = PacketSerializationHelper.SerializeJson(resp);
             Log($"[RESTORE LIST] Gửi danh sách {files.Count} file backup tới Client {RemoteEndPoint}.");
             await SendPacketAsync(new NetworkPacket(PacketType.RestoreListResponse, respBytes)).ConfigureAwait(false);
+        }
+
+        private async Task HandleAuthAsync(NetworkPacket packet)
+        {
+            var req = PacketSerializationHelper.DeserializeJson<AuthRequestPayload>(packet.Payload);
+            var resp = new AuthResponsePayload();
+
+            if (_metadata == null)
+            {
+                resp.Message = "Server chưa kết nối được CSDL người dùng.";
+            }
+            else if (req == null || string.IsNullOrWhiteSpace(req.Username))
+            {
+                resp.Message = "Thiếu tên đăng nhập.";
+            }
+            else
+            {
+                var user = _metadata.Authenticate(req.Username, req.Password ?? string.Empty, req.MachineName);
+                if (user == null)
+                {
+                    resp.Message = "Sai tên đăng nhập hoặc mật khẩu.";
+                    Log($"[ĐĂNG NHẬP THẤT BẠI] Tài khoản '{req.Username}'.");
+                }
+                else
+                {
+                    _userId = user.UserId;
+                    _username = user.Username;
+                    resp.IsSuccess = true;
+                    resp.UserId = user.UserId;
+                    resp.Username = user.Username;
+                    resp.Message = $"Xin chào {user.Username}.";
+                    Log($"[ĐĂNG NHẬP] Tài khoản '{user.Username}' (UserId={user.UserId}).");
+                }
+            }
+
+            await SendJsonAsync(PacketType.AuthResponse, resp).ConfigureAwait(false);
+        }
+
+        private async Task HandleSessionStartAsync(NetworkPacket packet)
+        {
+            var req = PacketSerializationHelper.DeserializeJson<BackupSessionStartPayload>(packet.Payload);
+            BackupSessionStartResponsePayload resp;
+
+            if (_metadata == null || !_userId.HasValue)
+            {
+                resp = new BackupSessionStartResponsePayload { IsAccepted = false, Message = "Cần đăng nhập trước khi mở phiên bản backup." };
+            }
+            else if (req == null)
+            {
+                resp = new BackupSessionStartResponsePayload { IsAccepted = false, Message = "Dữ liệu BackupSessionStart không hợp lệ." };
+            }
+            else
+            {
+                resp = _metadata.StartSession(_userId.Value, req);
+                if (resp.IsAccepted)
+                {
+                    _openVersions[resp.VersionId] = req.BackupId;
+                    Log($"[PHIÊN BẢN] {resp.Message} (Thư mục: {req.RootClientPath}, Kích hoạt: {req.TriggerType}).");
+                }
+            }
+
+            await SendJsonAsync(PacketType.BackupSessionStartResponse, resp).ConfigureAwait(false);
+        }
+
+        private async Task HandleSessionEndAsync(NetworkPacket packet)
+        {
+            var req = PacketSerializationHelper.DeserializeJson<BackupSessionEndPayload>(packet.Payload);
+            BackupSessionEndResponsePayload resp;
+
+            if (_metadata == null || !_userId.HasValue || req == null)
+            {
+                resp = new BackupSessionEndResponsePayload { IsSuccess = false, Message = "Cần đăng nhập và gửi dữ liệu hợp lệ." };
+            }
+            else if (!_openVersions.ContainsKey(req.VersionId))
+            {
+                resp = new BackupSessionEndResponsePayload { IsSuccess = false, VersionId = req.VersionId, Message = $"Phiên bản #{req.VersionId} không được mở trong phiên này." };
+            }
+            else
+            {
+                resp = _metadata.EndSession(_userId.Value, req);
+                _openVersions.TryRemove(req.VersionId, out _);
+                Log($"[PHIÊN BẢN] {resp.Message}");
+            }
+
+            await SendJsonAsync(PacketType.BackupSessionEndResponse, resp).ConfigureAwait(false);
+        }
+
+        private async Task HandleVersionListAsync(NetworkPacket packet)
+        {
+            var req = PacketSerializationHelper.DeserializeJson<VersionListRequestPayload>(packet.Payload) ?? new VersionListRequestPayload();
+            var resp = new VersionListResponsePayload();
+
+            if (_metadata == null || !_userId.HasValue)
+            {
+                resp.Message = "Cần đăng nhập để xem lịch sử phiên bản.";
+            }
+            else
+            {
+                resp.Versions = _metadata.ListVersions(_userId.Value, req.RootClientPath, req.IncludeFailed);
+                resp.IsSuccess = true;
+                resp.Message = $"Có {resp.Versions.Count} phiên bản.";
+                Log($"[LỊCH SỬ PHIÊN BẢN] Gửi {resp.Versions.Count} phiên bản cho '{_username}'.");
+            }
+
+            await SendJsonAsync(PacketType.VersionListResponse, resp).ConfigureAwait(false);
+        }
+
+        private async Task HandleVersionFilesAsync(NetworkPacket packet)
+        {
+            var req = PacketSerializationHelper.DeserializeJson<VersionFilesRequestPayload>(packet.Payload);
+            VersionFilesResponsePayload resp;
+
+            if (_metadata == null || !_userId.HasValue || req == null)
+                resp = new VersionFilesResponsePayload { IsSuccess = false, Message = "Cần đăng nhập để xem nội dung phiên bản." };
+            else
+                resp = _metadata.GetVersionFiles(_userId.Value, req.VersionId);
+
+            await SendJsonAsync(PacketType.VersionFilesResponse, resp).ConfigureAwait(false);
+        }
+
+        private bool CanAccessBackupId(string backupId)
+        {
+            if (_metadata == null || !_userId.HasValue || string.IsNullOrWhiteSpace(backupId))
+                return false;
+            return _metadata.GetOwnedBackupIds(_userId.Value).Contains(backupId);
+        }
+
+        private Task SendJsonAsync<T>(PacketType type, T payload)
+        {
+            byte[] bytes = PacketSerializationHelper.SerializeJson(payload);
+            return SendPacketAsync(new NetworkPacket(type, bytes));
         }
 
         #endregion
@@ -323,6 +582,22 @@ namespace BackupSystem.Server.NetworkServer
         {
             if (_isDisposed) return;
             _isDisposed = true;
+
+            // Phiên bản còn mở khi Client ngắt kết nối = backup dở dang → đánh dấu FAILED để không bị dùng làm bản cha
+            if (_metadata != null)
+            {
+                foreach (int versionId in _openVersions.Keys)
+                {
+                    try { _metadata.FailVersion(versionId); } catch { }
+                }
+                _openVersions.Clear();
+            }
+
+            foreach (string transferId in _pendingTransfers.Keys)
+            {
+                try { _storageManager.AbortTransfer(transferId); } catch { }
+            }
+            _pendingTransfers.Clear();
 
             try { _cts.Cancel(); } catch { }
             try { _networkStream.Dispose(); } catch { }

@@ -24,6 +24,11 @@ namespace SecureDataBackupSystem
             this.lblPort = new System.Windows.Forms.Label();
             this.txtServerIp = new System.Windows.Forms.TextBox();
             this.lblServerIp = new System.Windows.Forms.Label();
+            this.lblUsername = new System.Windows.Forms.Label();
+            this.txtUsername = new System.Windows.Forms.TextBox();
+            this.lblServerPassword = new System.Windows.Forms.Label();
+            this.txtServerPassword = new System.Windows.Forms.TextBox();
+            this.chkCompress = new System.Windows.Forms.CheckBox();
             this.grpSource = new System.Windows.Forms.GroupBox();
             this.btnBrowseFolder = new System.Windows.Forms.Button();
             this.btnBrowseFile = new System.Windows.Forms.Button();
@@ -78,6 +83,10 @@ namespace SecureDataBackupSystem
             // 
             this.grpServer.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
+            this.grpServer.Controls.Add(this.txtServerPassword);
+            this.grpServer.Controls.Add(this.lblServerPassword);
+            this.grpServer.Controls.Add(this.txtUsername);
+            this.grpServer.Controls.Add(this.lblUsername);
             this.grpServer.Controls.Add(this.btnPingServer);
             this.grpServer.Controls.Add(this.numPort);
             this.grpServer.Controls.Add(this.lblPort);
@@ -87,7 +96,7 @@ namespace SecureDataBackupSystem
             this.grpServer.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(15)))), ((int)(((byte)(50)))), ((int)(((byte)(90)))));
             this.grpServer.Location = new System.Drawing.Point(25, 60);
             this.grpServer.Name = "grpServer";
-            this.grpServer.Size = new System.Drawing.Size(780, 80);
+            this.grpServer.Size = new System.Drawing.Size(780, 120);
             this.grpServer.TabIndex = 1;
             this.grpServer.TabStop = false;
             this.grpServer.Text = "Cấu hình kết nối Máy chủ (TCP Socket)";
@@ -148,6 +157,44 @@ namespace SecureDataBackupSystem
             this.lblServerIp.TabIndex = 0;
             this.lblServerIp.Text = "Server IP:";
             // 
+            // lblUsername
+            // 
+            this.lblUsername.AutoSize = true;
+            this.lblUsername.Font = new System.Drawing.Font("Segoe UI", 10F);
+            this.lblUsername.Location = new System.Drawing.Point(20, 77);
+            this.lblUsername.Name = "lblUsername";
+            this.lblUsername.Size = new System.Drawing.Size(90, 23);
+            this.lblUsername.TabIndex = 5;
+            this.lblUsername.Text = "Tài khoản:";
+            // 
+            // txtUsername
+            // 
+            this.txtUsername.Font = new System.Drawing.Font("Segoe UI", 10F);
+            this.txtUsername.Location = new System.Drawing.Point(120, 74);
+            this.txtUsername.Name = "txtUsername";
+            this.txtUsername.Size = new System.Drawing.Size(230, 30);
+            this.txtUsername.TabIndex = 6;
+            this.txtUsername.Text = "admin";
+            // 
+            // lblServerPassword
+            // 
+            this.lblServerPassword.AutoSize = true;
+            this.lblServerPassword.Font = new System.Drawing.Font("Segoe UI", 10F);
+            this.lblServerPassword.Location = new System.Drawing.Point(380, 77);
+            this.lblServerPassword.Name = "lblServerPassword";
+            this.lblServerPassword.Size = new System.Drawing.Size(84, 23);
+            this.lblServerPassword.TabIndex = 7;
+            this.lblServerPassword.Text = "Mật khẩu:";
+            // 
+            // txtServerPassword
+            // 
+            this.txtServerPassword.Font = new System.Drawing.Font("Segoe UI", 10F);
+            this.txtServerPassword.Location = new System.Drawing.Point(470, 74);
+            this.txtServerPassword.Name = "txtServerPassword";
+            this.txtServerPassword.Size = new System.Drawing.Size(160, 30);
+            this.txtServerPassword.TabIndex = 8;
+            this.txtServerPassword.UseSystemPasswordChar = true;
+            // 
             // grpSource
             // 
             this.grpSource.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
@@ -158,7 +205,7 @@ namespace SecureDataBackupSystem
             this.grpSource.Controls.Add(this.lblSource);
             this.grpSource.Font = new System.Drawing.Font("Segoe UI", 10F, System.Drawing.FontStyle.Bold);
             this.grpSource.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(15)))), ((int)(((byte)(50)))), ((int)(((byte)(90)))));
-            this.grpSource.Location = new System.Drawing.Point(25, 150);
+            this.grpSource.Location = new System.Drawing.Point(25, 190);
             this.grpSource.Name = "grpSource";
             this.grpSource.Size = new System.Drawing.Size(780, 85);
             this.grpSource.TabIndex = 2;
@@ -219,6 +266,7 @@ namespace SecureDataBackupSystem
             // 
             this.grpOptions.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
+            this.grpOptions.Controls.Add(this.chkCompress);
             this.grpOptions.Controls.Add(this.chkAiProtection);
             this.grpOptions.Controls.Add(this.txtPassword);
             this.grpOptions.Controls.Add(this.lblPassword);
@@ -230,9 +278,9 @@ namespace SecureDataBackupSystem
             this.grpOptions.Controls.Add(this.lblMode);
             this.grpOptions.Font = new System.Drawing.Font("Segoe UI", 10F, System.Drawing.FontStyle.Bold);
             this.grpOptions.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(15)))), ((int)(((byte)(50)))), ((int)(((byte)(90)))));
-            this.grpOptions.Location = new System.Drawing.Point(25, 245);
+            this.grpOptions.Location = new System.Drawing.Point(25, 285);
             this.grpOptions.Name = "grpOptions";
-            this.grpOptions.Size = new System.Drawing.Size(780, 135);
+            this.grpOptions.Size = new System.Drawing.Size(780, 165);
             this.grpOptions.TabIndex = 3;
             this.grpOptions.TabStop = false;
             this.grpOptions.Text = "Tùy chọn Sao lưu & Bảo mật nâng cao";
@@ -250,6 +298,19 @@ namespace SecureDataBackupSystem
             this.chkAiProtection.TabIndex = 8;
             this.chkAiProtection.Text = "🛡️ Bật AI Chống Ransomware (Tự động phát hiện mã hóa/đổi đuôi lạ & chặn sao lưu)";
             this.chkAiProtection.UseVisualStyleBackColor = true;
+            // 
+            // chkCompress
+            // 
+            this.chkCompress.AutoSize = true;
+            this.chkCompress.Checked = true;
+            this.chkCompress.CheckState = System.Windows.Forms.CheckState.Checked;
+            this.chkCompress.Font = new System.Drawing.Font("Segoe UI", 9.5F);
+            this.chkCompress.Location = new System.Drawing.Point(24, 128);
+            this.chkCompress.Name = "chkCompress";
+            this.chkCompress.Size = new System.Drawing.Size(600, 25);
+            this.chkCompress.TabIndex = 9;
+            this.chkCompress.Text = "🗜️ Nén GZip trước khi gửi (tự bỏ qua file đã nén sẵn như .zip, .jpg, .mp4)";
+            this.chkCompress.UseVisualStyleBackColor = true;
             // 
             // txtPassword
             // 
@@ -356,7 +417,7 @@ namespace SecureDataBackupSystem
             this.grpTransfer.Controls.Add(this.btnStart);
             this.grpTransfer.Font = new System.Drawing.Font("Segoe UI", 10F, System.Drawing.FontStyle.Bold);
             this.grpTransfer.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(15)))), ((int)(((byte)(50)))), ((int)(((byte)(90)))));
-            this.grpTransfer.Location = new System.Drawing.Point(25, 390);
+            this.grpTransfer.Location = new System.Drawing.Point(25, 460);
             this.grpTransfer.Name = "grpTransfer";
             this.grpTransfer.Size = new System.Drawing.Size(780, 185);
             this.grpTransfer.TabIndex = 4;
@@ -512,7 +573,7 @@ namespace SecureDataBackupSystem
             this.btnOpenRestore.Name = "btnOpenRestore";
             this.btnOpenRestore.Size = new System.Drawing.Size(155, 38);
             this.btnOpenRestore.TabIndex = 11;
-            this.btnOpenRestore.Text = "🔄 Khôi phục";
+            this.btnOpenRestore.Text = "🕘 Phiên bản";
             this.btnOpenRestore.UseVisualStyleBackColor = false;
             this.btnOpenRestore.Click += new System.EventHandler(this.btnOpenRestore_Click);
             // 
@@ -524,7 +585,7 @@ namespace SecureDataBackupSystem
             this.grpLogs.Controls.Add(this.btnClearLogs);
             this.grpLogs.Font = new System.Drawing.Font("Segoe UI", 10F, System.Drawing.FontStyle.Bold);
             this.grpLogs.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(15)))), ((int)(((byte)(50)))), ((int)(((byte)(90)))));
-            this.grpLogs.Location = new System.Drawing.Point(25, 585);
+            this.grpLogs.Location = new System.Drawing.Point(25, 655);
             this.grpLogs.Name = "grpLogs";
             this.grpLogs.Size = new System.Drawing.Size(780, 185);
             this.grpLogs.TabIndex = 5;
@@ -565,7 +626,7 @@ namespace SecureDataBackupSystem
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.AutoScroll = true;
             this.BackColor = System.Drawing.Color.WhiteSmoke;
-            this.ClientSize = new System.Drawing.Size(830, 785);
+            this.ClientSize = new System.Drawing.Size(830, 855);
             this.Controls.Add(this.grpLogs);
             this.Controls.Add(this.grpTransfer);
             this.Controls.Add(this.grpOptions);
@@ -599,6 +660,11 @@ namespace SecureDataBackupSystem
         private System.Windows.Forms.NumericUpDown numPort;
         private System.Windows.Forms.Label lblPort;
         private System.Windows.Forms.Button btnPingServer;
+        private System.Windows.Forms.Label lblUsername;
+        private System.Windows.Forms.TextBox txtUsername;
+        private System.Windows.Forms.Label lblServerPassword;
+        private System.Windows.Forms.TextBox txtServerPassword;
+        private System.Windows.Forms.CheckBox chkCompress;
         private System.Windows.Forms.GroupBox grpSource;
         private System.Windows.Forms.Label lblSource;
         private System.Windows.Forms.TextBox txtSourcePath;

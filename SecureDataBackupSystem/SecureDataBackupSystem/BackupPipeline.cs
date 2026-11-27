@@ -14,7 +14,8 @@ namespace SecureDataBackupSystem
             bool appendEncryptedExtension,
             Func<string, string, bool> shouldBackup,
             Action<string, string> writeBackup,
-            IProgress<int> progress)
+            IProgress<int> progress,
+            Func<string, bool> includeFile = null)
         {
             if (string.IsNullOrWhiteSpace(sourcePath))
                 throw new Exception("Chưa chọn đường dẫn sao lưu!");
@@ -69,6 +70,14 @@ namespace SecureDataBackupSystem
                         .TrimStart(Path.DirectorySeparatorChar,
                                    Path.AltDirectorySeparatorChar)
                     : Path.GetFileName(file);
+
+                // Lọc theo định dạng file (ví dụ "*.docx;*.pdf") trước khi sao lưu
+                if (includeFile != null && !includeFile(relativePath))
+                {
+                    if (progress != null && totalFiles > 0)
+                        progress.Report((fileIndex + 1) * 100 / totalFiles);
+                    continue;
+                }
 
                 string destination = Path.Combine(destinationRoot, relativePath);
                 if (appendEncryptedExtension)

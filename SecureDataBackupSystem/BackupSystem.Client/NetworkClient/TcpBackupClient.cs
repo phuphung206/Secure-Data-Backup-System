@@ -125,7 +125,8 @@ namespace BackupSystem.Client.NetworkClient
             string sourceKey = "",
             int chunkSize = NetworkProtocolConstants.DefaultChunkSize,
             IProgress<TransferProgressReport>? progress = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            BackupInitPayload? versionMetadata = null)
         {
             if (!IsConnected || _networkStream == null)
                 throw new InvalidOperationException("Chưa kết nối tới Backup Server.");
@@ -165,6 +166,19 @@ namespace BackupSystem.Client.NetworkClient
                 TotalChunks = totalChunks,
                 ExpectedSha256 = sha256
             };
+
+            // Metadata phiên bản (VersionId, đường dẫn gốc, SHA-256 gốc, cờ nén/mã hóa) nếu file thuộc một phiên backup
+            if (versionMetadata != null)
+            {
+                initPayload.VersionId = versionMetadata.VersionId;
+                initPayload.IsEncrypted = versionMetadata.IsEncrypted;
+                initPayload.IsCompressed = versionMetadata.IsCompressed;
+                initPayload.OriginalRelativePath = versionMetadata.OriginalRelativePath;
+                initPayload.OriginalSha256 = versionMetadata.OriginalSha256;
+                initPayload.OriginalSizeBytes = versionMetadata.OriginalSizeBytes;
+                initPayload.OriginalLastWriteTimeUtc = versionMetadata.OriginalLastWriteTimeUtc;
+                initPayload.ChangeType = versionMetadata.ChangeType;
+            }
 
             // 1. Gửi gói tin khởi tạo BackupInitRequest
             byte[] initBytes = PacketSerializationHelper.SerializeJson(initPayload);
@@ -326,21 +340,55 @@ namespace BackupSystem.Client.NetworkClient
             IProgress<TransferProgressReport>? progress = null,
             CancellationToken cancellationToken = default)
         {
-            if (!IsConnected || _networkStream == null)
-                throw new InvalidOperationException("Chưa kết nối tới Backup Server.");
-
-            Log($"[RESTORE] Bắt đầu yêu cầu file '{relativePath}' từ backup '{backupId}'...");
-
             var req = new RestoreInitRequestPayload
             {
                 BackupId = backupId,
                 RelativePath = relativePath
             };
 
+            Log($"[RESTORE] Bắt đầu yêu cầu file '{relativePath}' từ backup '{backupId}'...");
+            await DownloadCoreAsync(req, localDestinationPath, progress, cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+
+        /// <summary>
+        /// Tải file (dạng đã lưu trên Server - có thể đã nén/mã hóa) của một phiên bản cụ thể.
+        /// Kết quả trả về cho biết file có cần giải mã/giải nén và SHA-256 của file gốc.
+        /// </summary>
+        public Task<RestoreInitResponsePayload> DownloadVersionFileAsync(
+            int versionId,
+            string relativePath,
+            string localDestinationPath,
+            IProgress<TransferProgressReport>? progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (versionId <= 0)
+                throw new ArgumentOutOfRangeException(nameof(versionId));
+
+            Log($"[RESTORE] Yêu cầu '{relativePath}' tại phiên bản #{versionId}...");
+            var req = new RestoreInitRequestPayload
+            {
+                VersionId = versionId,
+                RelativePath = relativePath
+            };
+            return DownloadCoreAsync(req, localDestinationPath, progress, cancellationToken);
+        }
+
+        private async Task<RestoreInitResponsePayload> DownloadCoreAsync(
+            RestoreInitRequestPayload req,
+            string localDestinationPath,
+            IProgress<TransferProgressReport>? progress,
+            CancellationToken cancellationToken)
+        {
+            if (!IsConnected || _networkStream == null)
+                throw new InvalidOperationException("Chưa kết nối tới Backup Server.");
+
+            string relativePath = req.RelativePath;
             byte[] reqBytes = PacketSerializationHelper.SerializeJson(req);
             await SendPacketAsync(new NetworkPacket(PacketType.RestoreInitRequest, reqBytes), cancellationToken).ConfigureAwait(false);
 
             var initRespPacket = await ReceivePacketAsync(cancellationToken).ConfigureAwait(false);
+            ThrowIfError(initRespPacket);
             if (initRespPacket == null || initRespPacket.Type != PacketType.RestoreInitResponse)
             {
                 throw new InvalidOperationException("Không nhận được phản hồi khởi tạo Restore từ Server.");
@@ -349,7 +397,9 @@ namespace BackupSystem.Client.NetworkClient
             var initResp = PacketSerializationHelper.DeserializeJson<RestoreInitResponsePayload>(initRespPacket.Payload);
             if (initResp == null || !initResp.FileExists)
             {
-                throw new FileNotFoundException($"File '{relativePath}' không tồn tại trên Server.", relativePath);
+                throw new FileNotFoundException(
+                    string.IsNullOrWhiteSpace(initResp?.Message) ? $"File '{relativePath}' không tồn tại trên Server." : initResp!.Message,
+                    relativePath);
             }
 
             long totalBytes = initResp.TotalBytes;
@@ -379,6 +429,7 @@ namespace BackupSystem.Client.NetworkClient
                     await SendPacketAsync(new NetworkPacket(PacketType.RestoreChunkRequest, chunkReqBytes), cancellationToken).ConfigureAwait(false);
 
                     var chunkDataPacket = await ReceivePacketAsync(cancellationToken).ConfigureAwait(false);
+                    ThrowIfError(chunkDataPacket);
                     if (chunkDataPacket == null || chunkDataPacket.Type != PacketType.RestoreChunkData)
                     {
                         throw new IOException($"Không nhận được chunk {i} từ Server.");
@@ -435,9 +486,97 @@ namespace BackupSystem.Client.NetworkClient
                     StatusMessage = "Khôi phục thành công 100%!"
                 });
 
-                return true;
+                return initResp;
             }
         }
+
+        #region Tài khoản & Quản lý phiên bản (Version Control)
+
+        /// <summary>
+        /// Đăng nhập tài khoản trên Server. Bắt buộc trước khi mở phiên bản hoặc khôi phục theo phiên bản.
+        /// </summary>
+        public async Task<AuthResponsePayload> AuthenticateAsync(string username, string password, CancellationToken cancellationToken = default)
+        {
+            var resp = await RequestAsync<AuthResponsePayload>(
+                PacketType.AuthRequest,
+                new AuthRequestPayload { Username = username, Password = password, MachineName = Environment.MachineName },
+                PacketType.AuthResponse,
+                cancellationToken).ConfigureAwait(false);
+
+            Log(resp.IsSuccess ? $"[ĐĂNG NHẬP] {resp.Message}" : $"[ĐĂNG NHẬP THẤT BẠI] {resp.Message}");
+            return resp;
+        }
+
+        public Task<BackupSessionStartResponsePayload> StartBackupSessionAsync(BackupSessionStartPayload request, CancellationToken cancellationToken = default)
+        {
+            return RequestAsync<BackupSessionStartResponsePayload>(
+                PacketType.BackupSessionStartRequest, request, PacketType.BackupSessionStartResponse, cancellationToken);
+        }
+
+        public Task<BackupSessionEndResponsePayload> EndBackupSessionAsync(BackupSessionEndPayload request, CancellationToken cancellationToken = default)
+        {
+            return RequestAsync<BackupSessionEndResponsePayload>(
+                PacketType.BackupSessionEndRequest, request, PacketType.BackupSessionEndResponse, cancellationToken);
+        }
+
+        public async Task<List<BackupVersion>> ListVersionsAsync(string rootClientPath = "", bool includeFailed = false, CancellationToken cancellationToken = default)
+        {
+            var resp = await RequestAsync<VersionListResponsePayload>(
+                PacketType.VersionListRequest,
+                new VersionListRequestPayload { RootClientPath = rootClientPath ?? string.Empty, IncludeFailed = includeFailed },
+                PacketType.VersionListResponse,
+                cancellationToken).ConfigureAwait(false);
+
+            if (!resp.IsSuccess)
+                throw new InvalidOperationException(resp.Message);
+            return resp.Versions ?? new List<BackupVersion>();
+        }
+
+        public async Task<List<VersionFileEntry>> GetVersionFilesAsync(int versionId, CancellationToken cancellationToken = default)
+        {
+            var resp = await RequestAsync<VersionFilesResponsePayload>(
+                PacketType.VersionFilesRequest,
+                new VersionFilesRequestPayload { VersionId = versionId },
+                PacketType.VersionFilesResponse,
+                cancellationToken).ConfigureAwait(false);
+
+            if (!resp.IsSuccess)
+                throw new InvalidOperationException(resp.Message);
+            return resp.Files ?? new List<VersionFileEntry>();
+        }
+
+        private async Task<TResponse> RequestAsync<TResponse>(PacketType requestType, object request, PacketType expectedResponse, CancellationToken cancellationToken)
+            where TResponse : class
+        {
+            if (!IsConnected || _networkStream == null)
+                throw new InvalidOperationException("Chưa kết nối tới Backup Server.");
+
+            byte[] payload = PacketSerializationHelper.SerializeJson(request);
+            await SendPacketAsync(new NetworkPacket(requestType, payload), cancellationToken).ConfigureAwait(false);
+
+            var respPacket = await ReceivePacketAsync(cancellationToken).ConfigureAwait(false);
+            ThrowIfError(respPacket);
+            if (respPacket == null || respPacket.Type != expectedResponse)
+                throw new IOException($"Server không phản hồi {expectedResponse} hợp lệ (nhận {respPacket?.Type.ToString() ?? "null"}).");
+
+            var resp = PacketSerializationHelper.DeserializeJson<TResponse>(respPacket.Payload);
+            if (resp == null)
+                throw new InvalidDataException($"Không đọc được dữ liệu {expectedResponse}.");
+            return resp;
+        }
+
+        private static void ThrowIfError(NetworkPacket? packet)
+        {
+            if (packet != null && packet.Type == PacketType.ErrorMessage)
+            {
+                string message = packet.Payload != null && packet.Payload.Length > 0
+                    ? System.Text.Encoding.UTF8.GetString(packet.Payload)
+                    : "Lỗi không xác định từ Server.";
+                throw new IOException("Server báo lỗi: " + message);
+            }
+        }
+
+        #endregion
 
         /// <summary>
         /// Lấy danh sách các file backup hiện có trên Server để hỗ trợ khôi phục từ xa.

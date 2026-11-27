@@ -32,6 +32,7 @@
             this.cboBackup = new System.Windows.Forms.ComboBox();
             this.btnChooseFolder = new System.Windows.Forms.Button();
             this.btnRestore = new System.Windows.Forms.Button();
+            this.btnVersionRestore = new System.Windows.Forms.Button();
             this.progressRestore = new System.Windows.Forms.ProgressBar();
             this.txtRestorePath = new System.Windows.Forms.TextBox();
             this.txtPassword = new System.Windows.Forms.TextBox();
@@ -95,6 +96,22 @@
             this.btnRestore.Text = "Bắt đầu khôi phục";
             this.btnRestore.UseVisualStyleBackColor = false;
             this.btnRestore.Click += new System.EventHandler(this.btnRestore_Click);
+            // 
+            // btnVersionRestore
+            // 
+            this.btnVersionRestore.BackColor = System.Drawing.Color.SeaGreen;
+            this.btnVersionRestore.Cursor = System.Windows.Forms.Cursors.Hand;
+            this.btnVersionRestore.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnVersionRestore.Font = new System.Drawing.Font("Segoe UI", 10F, System.Drawing.FontStyle.Bold);
+            this.btnVersionRestore.ForeColor = System.Drawing.Color.White;
+            this.btnVersionRestore.Location = new System.Drawing.Point(590, 305);
+            this.btnVersionRestore.Margin = new System.Windows.Forms.Padding(4);
+            this.btnVersionRestore.Name = "btnVersionRestore";
+            this.btnVersionRestore.Size = new System.Drawing.Size(185, 55);
+            this.btnVersionRestore.TabIndex = 12;
+            this.btnVersionRestore.Text = "Theo phiên bản (Server)...";
+            this.btnVersionRestore.UseVisualStyleBackColor = false;
+            this.btnVersionRestore.Click += new System.EventHandler(this.btnVersionRestore_Click);
             // 
             // progressRestore
             // 
@@ -198,6 +215,7 @@
             this.Controls.Add(this.txtPassword);
             this.Controls.Add(this.txtRestorePath);
             this.Controls.Add(this.progressRestore);
+            this.Controls.Add(this.btnVersionRestore);
             this.Controls.Add(this.btnRestore);
             this.Controls.Add(this.btnChooseFolder);
             this.Controls.Add(this.cboBackup);
@@ -218,6 +236,7 @@
         private System.Windows.Forms.Label lblTitle;
         private System.Windows.Forms.ComboBox cboBackup;
         private System.Windows.Forms.Button btnRestore;
+        private System.Windows.Forms.Button btnVersionRestore;
         private System.Windows.Forms.Button btnChooseFolder;
         private System.Windows.Forms.ProgressBar progressRestore;
         private System.Windows.Forms.TextBox txtRestorePath;

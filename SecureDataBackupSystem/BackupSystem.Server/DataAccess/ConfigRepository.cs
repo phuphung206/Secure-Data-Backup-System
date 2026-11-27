@@ -7,10 +7,18 @@ namespace BackupSystem.Server.DataAccess
 {
     public class ConfigRepository
     {
+        private readonly string? _dbFilePath;
+
+        /// <param name="dbFilePath">Đường dẫn file SQLite (null = CSDL mặc định).</param>
+        public ConfigRepository(string? dbFilePath = null)
+        {
+            _dbFilePath = dbFilePath;
+        }
+
         // 1. [CREATE / UPDATE] Lưu hoặc cập nhật cấu hình thư mục cần Backup của Client
         public int SaveOrUpdateConfig(BackupConfig config)
         {
-            using var conn = DbConnectionFactory.GetConnection();
+            using var conn = DbConnectionFactory.GetConnection(_dbFilePath);
             using var checkCmd = conn.CreateCommand();
             checkCmd.CommandText = @"
                 SELECT ConfigId FROM BackupConfigs 
@@ -68,7 +76,7 @@ namespace BackupSystem.Server.DataAccess
         public List<BackupConfig> GetConfigsByUser(int userId)
         {
             var list = new List<BackupConfig>();
-            using var conn = DbConnectionFactory.GetConnection();
+            using var conn = DbConnectionFactory.GetConnection(_dbFilePath);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 SELECT ConfigId, UserId, SourceFolderPath, AllowedExtensions, ExcludedPatterns, 

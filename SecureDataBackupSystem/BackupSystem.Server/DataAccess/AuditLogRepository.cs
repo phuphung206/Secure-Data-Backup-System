@@ -6,12 +6,20 @@ namespace BackupSystem.Server.DataAccess
 {
     public class AuditLogRepository
     {
+        private readonly string? _dbFilePath;
+
+        /// <param name="dbFilePath">Đường dẫn file SQLite (null = CSDL mặc định).</param>
+        public AuditLogRepository(string? dbFilePath = null)
+        {
+            _dbFilePath = dbFilePath;
+        }
+
         // ==================== 1. QUẢN LÝ RESTORE LOGS ====================
 
         // Ghi nhận mỗi khi người dùng yêu cầu Phục hồi (Restore 1 file lẻ hoặc cả thư mục)
         public int LogRestoreOperation(int userId, int versionId, string restoreScope, string targetFilePath, string status = "COMPLETED")
         {
-            using var conn = DbConnectionFactory.GetConnection();
+            using var conn = DbConnectionFactory.GetConnection(_dbFilePath);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 INSERT INTO RestoreLogs (UserId, VersionId, RestoreScope, TargetFilePath, Status)
@@ -31,7 +39,7 @@ namespace BackupSystem.Server.DataAccess
         public List<RestoreLog> GetRestoreHistoryByUser(int userId)
         {
             var list = new List<RestoreLog>();
-            using var conn = DbConnectionFactory.GetConnection();
+            using var conn = DbConnectionFactory.GetConnection(_dbFilePath);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 SELECT RestoreId, UserId, VersionId, RestoreScope, TargetFilePath, Status, RestoredAt
@@ -62,7 +70,7 @@ namespace BackupSystem.Server.DataAccess
         // Ghi nhận cảnh báo khi AI của Nhất phát hiện dấu hiệu Ransomware
         public int LogSecurityAlert(int userId, string eventType, double anomalyScore, int affectedFilesCount, string description)
         {
-            using var conn = DbConnectionFactory.GetConnection();
+            using var conn = DbConnectionFactory.GetConnection(_dbFilePath);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 INSERT INTO SecurityLogs (UserId, EventType, AnomalyScore, AffectedFilesCount, Description)
@@ -82,7 +90,7 @@ namespace BackupSystem.Server.DataAccess
         public List<SecurityLog> GetSecurityLogsByUser(int userId)
         {
             var list = new List<SecurityLog>();
-            using var conn = DbConnectionFactory.GetConnection();
+            using var conn = DbConnectionFactory.GetConnection(_dbFilePath);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 SELECT LogId, UserId, EventType, AnomalyScore, AffectedFilesCount, Description, CreatedAt
