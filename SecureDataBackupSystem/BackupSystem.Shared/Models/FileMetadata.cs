@@ -16,5 +16,8 @@ namespace BackupSystem.Shared.Models
         public string ChangeType { get; set; } = "MODIFIED"; // ADDED | MODIFIED | UNCHANGED | DELETED
         public DateTime LastModifiedTime { get; set; }
         public string ServerPhysicalPath { get; set; } = string.Empty;
+        public bool IsEncrypted { get; set; }
+        public bool IsCompressed { get; set; }
+        public int SourceVersionId { get; set; } // Phiên bản thực sự chứa file vật lý (khác VersionId nếu được kế thừa)
     }
 }

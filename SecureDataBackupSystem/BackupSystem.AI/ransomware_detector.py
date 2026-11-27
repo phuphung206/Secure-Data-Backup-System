@@ -15,7 +15,8 @@ from typing import List, Dict, Any
 
 # Danh sách phần mở rộng thường thấy ở các chủng Ransomware phổ biến
 SUSPICIOUS_EXTENSIONS = {
-    ".locked", ".crypto", ".wnry", ".crypted", ".enc", ".ransom",
+    # Không có ".enc": đây là đuôi file mã hóa hợp lệ do chính Secure Data Backup tạo ra.
+    ".locked", ".crypto", ".wnry", ".crypted", ".ransom",
     ".locky", ".cerber", ".wannacry", ".crypt", ".payme", ".darkside",
     ".revil", ".conti", ".blackmatter", ".stop", ".djvu", ".phobos",
     ".dharma", ".ryuk", ".makop", ".mallox", ".zepto", ".thor"
@@ -65,6 +66,19 @@ def calculate_shannon_entropy(file_path: str, max_sample_bytes: int = 65536) -> 
     except Exception:
         return 0.0
 
+def is_own_encrypted_backup(file_path: str) -> bool:
+    """
+    File mã hóa do chính Secure Data Backup tạo ra bắt đầu bằng header "SDB" + A/F/P/E
+    (SDBAES256, SDBAESv2, SDBF, SDBP, SDBE). Entropy cao của các file này là bình thường.
+    """
+    try:
+        with open(file_path, "rb") as f:
+            header = f.read(4)
+        return len(header) == 4 and header[:3] == b"SDB" and header[3:4] in (b"A", b"F", b"P", b"E")
+    except Exception:
+        return False
+
+
 def analyze_target(target_path: str, specific_files: List[str] = None) -> Dict[str, Any]:
     """
     Quét và phân tích độ bất thường của tập tin để phát hiện tấn công Ransomware.
@@ -83,6 +97,9 @@ def analyze_target(target_path: str, specific_files: List[str] = None) -> Dict[s
                     break
             if len(files_to_check) >= 500:
                 break
+
+    own_encrypted = {f for f in files_to_check if is_own_encrypted_backup(f)}
+    files_to_check = [f for f in files_to_check if f not in own_encrypted]
 
     total_files = len(files_to_check)
     if total_files == 0:

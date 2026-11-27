@@ -22,6 +22,14 @@ namespace SecureDataBackupSystem
             _worker = new NetworkBackupWorker();
             _worker.TransferProgressUpdated += Worker_TransferProgressUpdated;
             _worker.TransferCompleted += Worker_TransferCompleted;
+            _worker.LogMessage += msg =>
+            {
+                // Engine ghi log từ luồng nền → chuyển về luồng giao diện
+                if (IsDisposed || !IsHandleCreated) return;
+                try { BeginInvoke(new Action(() => Log(msg))); } catch (InvalidOperationException) { }
+            };
+
+            LoadSavedSettings();
 
             // Kéo thả file/folder vào ô đường dẫn
             txtSourcePath.AllowDrop = true;
@@ -40,6 +48,44 @@ namespace SecureDataBackupSystem
             };
         }
 
+        /// <summary>
+        /// Điền lại cấu hình kết nối đã lưu (Server, tài khoản, bộ lọc, nén...) để dùng chung với Lập lịch & Real-time.
+        /// </summary>
+        private void LoadSavedSettings()
+        {
+            var settings = ClientSettingsStore.Load();
+            txtServerIp.Text = settings.ServerHost;
+            numPort.Value = Math.Max(numPort.Minimum, Math.Min(numPort.Maximum, settings.ServerPort));
+            txtUsername.Text = settings.Username;
+            txtServerPassword.Text = settings.GetPassword();
+            txtFilter.Text = string.IsNullOrWhiteSpace(settings.AllowedExtensions) ? "*.*" : settings.AllowedExtensions;
+            chkCompress.Checked = settings.EnableCompression;
+            chkAiProtection.Checked = settings.EnableAiRansomwareProtection;
+        }
+
+        private void SaveSettings(NetworkBackupWorkerArgs args)
+        {
+            try
+            {
+                var settings = ClientSettingsStore.Load();
+                settings.ServerHost = args.ServerHost;
+                settings.ServerPort = args.ServerPort;
+                settings.Username = args.Username;
+                settings.SetPassword(args.Password);
+                settings.AllowedExtensions = args.AllowedExtensions;
+                settings.EnableCompression = args.EnableCompression;
+                settings.EnableAiRansomwareProtection = args.EnableAiRansomwareProtection;
+                settings.ChunkSize = args.ChunkSize;
+                settings.EncryptBeforeTransfer = args.EncryptBeforeTransfer;
+                settings.SetEncryptionPassword(args.EncryptBeforeTransfer ? args.EncryptionPassword : string.Empty);
+                ClientSettingsStore.Save(settings);
+            }
+            catch (Exception ex)
+            {
+                Log("[CẢNH BÁO] Không lưu được cấu hình kết nối: " + ex.Message);
+            }
+        }
+
         private async void btnPingServer_Click(object sender, EventArgs e)
         {
             string host = txtServerIp.Text.Trim();
@@ -56,7 +102,12 @@ namespace SecureDataBackupSystem
                     if (ok)
                     {
                         Log($"[THÀNH CÔNG] Máy chủ tại {host}:{port} phản hồi tốt!");
-                        MessageBox.Show($"Kết nối thành công tới Server {host}:{port}!", "Thông báo", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        var auth = await testClient.AuthenticateAsync(txtUsername.Text.Trim(), txtServerPassword.Text);
+                        Log(auth.IsSuccess ? $"[ĐĂNG NHẬP] {auth.Message}" : $"[ĐĂNG NHẬP THẤT BẠI] {auth.Message}");
+                        MessageBox.Show(
+                            $"Kết nối thành công tới Server {host}:{port}!\n" +
+                            (auth.IsSuccess ? $"Đăng nhập tài khoản '{auth.Username}' thành công." : "Đăng nhập thất bại: " + auth.Message),
+                            "Thông báo", MessageBoxButtons.OK, auth.IsSuccess ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
                     }
                     else
                     {
@@ -133,6 +184,13 @@ namespace SecureDataBackupSystem
                 return;
             }
 
+            if (string.IsNullOrWhiteSpace(txtUsername.Text))
+            {
+                MessageBox.Show("Vui lòng nhập tài khoản Server (mặc định: admin / 123456).", "Thông báo", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtUsername.Focus();
+                return;
+            }
+
             string host = txtServerIp.Text.Trim();
             int port = (int)numPort.Value;
 
@@ -159,8 +217,14 @@ namespace SecureDataBackupSystem
                 AllowedExtensions = string.IsNullOrWhiteSpace(txtFilter.Text) ? "*.*" : txtFilter.Text.Trim(),
                 EncryptBeforeTransfer = chkEncrypt.Checked,
                 EncryptionPassword = txtPassword.Text,
-                EnableAiRansomwareProtection = chkAiProtection.Checked
+                EnableAiRansomwareProtection = chkAiProtection.Checked,
+                EnableCompression = chkCompress.Checked,
+                Username = txtUsername.Text.Trim(),
+                Password = txtServerPassword.Text,
+                TriggerType = "MANUAL"
             };
+
+            SaveSettings(args);
 
             // Thiết lập trạng thái giao diện UI
             btnStart.Enabled = false;
@@ -175,7 +239,8 @@ namespace SecureDataBackupSystem
 
             string modeText = args.IsIncremental ? "Incremental (Gia tăng)" : "Full (Toàn bộ)";
             string encText = args.EncryptBeforeTransfer ? ", Mã hóa AES-256: BẬT" : string.Empty;
-            string aiText = args.EnableAiRansomwareProtection ? ", AI Ransomware: BẬT" : string.Empty;
+            string aiText = (args.EnableAiRansomwareProtection ? ", AI Ransomware: BẬT" : string.Empty) +
+                            (args.EnableCompression ? ", Nén GZip: BẬT" : string.Empty);
 
             Log($"[BẮT ĐẦU] Khởi chạy sao lưu TCP: Chế độ {modeText}{encText}{aiText} (Chunk: {chunkSize / 1024} KB)...");
 
@@ -253,7 +318,8 @@ namespace SecureDataBackupSystem
                 lblPercent.Text = "100%";
                 lblCurrentFile.Text = "Trạng thái: Hoàn tất 100%!";
                 Log($"[HOÀN TẤT] {result.Message}");
-                AddHistory(modeLabel, sourceLabel, $"Thành công ({result.TransferredFilesCount} file)");
+                AddHistory(modeLabel, sourceLabel,
+                    $"Thành công - phiên bản #{result.VersionId} ({result.TransferredFilesCount} file gửi, {result.SnapshotFilesCount} file trong snapshot)");
                 MessageBox.Show(result.Message, "Sao lưu thành công", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             else
@@ -297,16 +363,11 @@ namespace SecureDataBackupSystem
 
         private void btnOpenRestore_Click(object sender, EventArgs e)
         {
-            using (var frm = new FormRestore())
+            // Lịch sử phiên bản trên Server + khôi phục toàn bộ thư mục / từng file về đúng thời điểm
+            using (var frm = new FormVersionRestore())
             {
-                frm.Text = "Khôi phục dữ liệu";
                 frm.ServerHost = txtServerIp.Text.Trim();
                 frm.ServerPort = (int)numPort.Value;
-                frm.FormBorderStyle = FormBorderStyle.Sizable;
-                frm.ControlBox = true;
-                frm.MinimizeBox = true;
-                frm.MaximizeBox = true;
-                frm.StartPosition = FormStartPosition.CenterParent;
                 frm.ShowDialog(this);
             }
         }

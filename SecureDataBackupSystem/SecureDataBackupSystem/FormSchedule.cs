@@ -28,6 +28,24 @@ namespace SecureDataBackupSystem
             lblStatus.Text = isScheduleEnabled // Hiển thị trạng thái lịch
                 ? "Đã bật lịch sao lưu"
                 : "Chưa bật lịch sao lưu";
+
+            // Khôi phục cấu hình lịch đã lưu (đường dẫn, gửi Server, Incremental)
+            try
+            {
+                var saved = ScheduleConfig.Load();
+                if (saved != null)
+                {
+                    txtSchedulePath.Text = saved.SourcePath;
+                    chkScheduleServer.Checked = saved.UploadToServer;
+                    chkScheduleIncremental.Checked = saved.Incremental;
+                }
+            }
+            catch
+            {
+            }
+
+            chkScheduleServer.CheckedChanged += (s, e) => chkScheduleIncremental.Enabled = chkScheduleServer.Checked;
+            chkScheduleIncremental.Enabled = chkScheduleServer.Checked;
         }
 
         private const string TaskName = "SecureDataBackupSchedule";
@@ -48,6 +66,10 @@ namespace SecureDataBackupSystem
             // Kiểm tra người dùng đã chọn tần suất chưa
             if (string.IsNullOrWhiteSpace(frequency))
                 throw new Exception("Vui lòng chọn tần suất sao lưu!");
+
+            // Lịch gửi lên Server dùng cấu hình kết nối/tài khoản đã lưu ở màn hình Sao lưu mạng
+            if (chkScheduleServer.Checked && !ClientSettingsStore.Exists)
+                throw new Exception("Chưa có cấu hình Server. Hãy chạy \"Sao lưu mạng\" một lần để lưu địa chỉ Server và tài khoản.");
 
             // Lấy giờ sao lưu
             string time = dtpTime.Value.ToString("HH:mm");
@@ -125,9 +147,12 @@ namespace SecureDataBackupSystem
 
             Directory.CreateDirectory(configFolder);
 
-            string configPath = Path.Combine(
-                configFolder, "schedule_path.txt"
-            );
+            var scheduleConfig = new ScheduleConfig
+            {
+                SourcePath = sourcePath,
+                UploadToServer = chkScheduleServer.Checked,
+                Incremental = chkScheduleServer.Checked && chkScheduleIncremental.Checked
+            };
 
             // Tạo lệnh chạy Backup ngầm
             string taskCommand = "\\\"" + exePath +
@@ -147,7 +172,7 @@ namespace SecureDataBackupSystem
             RunSchtasks(arguments);
 
             // Chỉ lưu cấu hình sau khi tạo lịch thành công
-            File.WriteAllText(configPath, sourcePath);
+            scheduleConfig.Save();
         }
 
         // Xóa lịch sao lưu trong Windows Task Scheduler

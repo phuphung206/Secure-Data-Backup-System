@@ -15,7 +15,7 @@ erDiagram
     USERS {
         int UserId PK "Khoa chinh (Auto Increment)"
         varchar Username UK "Ten dang nhap duy nhat"
-        varchar PasswordHash "Mat khau bam SHA-256"
+        varchar PasswordHash "Mat khau bam PBKDF2-SHA256 co salt"
         varchar MachineName "Ten may tram Client"
         bigint QuotaBytes "Han muc dung luong (Mac dinh 10GB)"
         bigint UsedBytes "Dung luong da su dung"
@@ -45,6 +45,9 @@ erDiagram
         bigint TotalSizeBytes "Tong dung luong (Bytes)"
         varchar Status "IN_PROGRESS - COMPLETED - BLOCKED_BY_AI - FAILED"
         datetime CreatedAt "Thoi diem sao luu"
+        varchar ClientBackupId "Thu muc vat ly BackupStore/<id>"
+        int OriginalSizeBytes "Tong dung luong goc cua snapshot"
+        datetime CompletedAt "Thoi diem chot phien ban"
     }
 
     BACKED_UP_FILES {
@@ -60,6 +63,9 @@ erDiagram
         varchar ChangeType "ADDED - MODIFIED - UNCHANGED - DELETED"
         datetime LastModifiedTime "Thoi gian sua doi cuoi o Client"
         varchar ServerPhysicalPath "Duong dan luu file .enc tren o cung Server"
+        bool IsEncrypted "Da ma hoa AES-256 (SDBAESv2)"
+        bool IsCompressed "Da nen GZip"
+        int SourceVersionId "Phien ban chua file vat ly (file ke thua)"
     }
 
     RESTORE_LOGS {

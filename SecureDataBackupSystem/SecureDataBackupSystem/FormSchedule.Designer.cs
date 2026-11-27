@@ -41,6 +41,8 @@
             this.btnChooseFolder = new System.Windows.Forms.Button();
             this.btnSchedule = new System.Windows.Forms.Button();
             this.clbDays = new System.Windows.Forms.CheckedListBox();
+            this.chkScheduleServer = new System.Windows.Forms.CheckBox();
+            this.chkScheduleIncremental = new System.Windows.Forms.CheckBox();
             this.SuspendLayout();
             // 
             // lblTitle
@@ -205,12 +207,34 @@
             this.clbDays.Size = new System.Drawing.Size(250, 128);
             this.clbDays.TabIndex = 13;
             // 
+            // chkScheduleServer
+            // 
+            this.chkScheduleServer.AutoSize = true;
+            this.chkScheduleServer.Location = new System.Drawing.Point(55, 240);
+            this.chkScheduleServer.Name = "chkScheduleServer";
+            this.chkScheduleServer.Size = new System.Drawing.Size(480, 32);
+            this.chkScheduleServer.TabIndex = 14;
+            this.chkScheduleServer.Text = "Gửi lên Server (dùng cấu hình Sao lưu mạng)";
+            this.chkScheduleServer.UseVisualStyleBackColor = true;
+            // 
+            // chkScheduleIncremental
+            // 
+            this.chkScheduleIncremental.AutoSize = true;
+            this.chkScheduleIncremental.Location = new System.Drawing.Point(55, 272);
+            this.chkScheduleIncremental.Name = "chkScheduleIncremental";
+            this.chkScheduleIncremental.Size = new System.Drawing.Size(480, 32);
+            this.chkScheduleIncremental.TabIndex = 15;
+            this.chkScheduleIncremental.Text = "Chỉ gửi file thay đổi (Incremental)";
+            this.chkScheduleIncremental.UseVisualStyleBackColor = true;
+            // 
             // FormSchedule
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 28F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.WhiteSmoke;
             this.ClientSize = new System.Drawing.Size(837, 500);
+            this.Controls.Add(this.chkScheduleIncremental);
+            this.Controls.Add(this.chkScheduleServer);
             this.Controls.Add(this.clbDays);
             this.Controls.Add(this.btnSchedule);
             this.Controls.Add(this.btnChooseFolder);
@@ -237,6 +261,9 @@
         }
 
         #endregion
+
+        private System.Windows.Forms.CheckBox chkScheduleServer;
+        private System.Windows.Forms.CheckBox chkScheduleIncremental;
 
         private System.Windows.Forms.Label lblTitle;
         private System.Windows.Forms.Label lblPath;

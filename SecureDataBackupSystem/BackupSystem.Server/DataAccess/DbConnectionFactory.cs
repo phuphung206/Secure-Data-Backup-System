@@ -11,28 +11,37 @@ namespace BackupSystem.Server.DataAccess
         public static readonly string ServerDataRoot = BackupSystem.Shared.Models.BackupPaths.GetBackupRoot();
         public static readonly string DbDirectory = Path.Combine(ServerDataRoot, "Database");
         public static readonly string DbFilePath = Path.Combine(DbDirectory, "BackupServer.sqlite");
-        private static readonly string ConnectionString = $"Data Source={DbFilePath}";
 
-        public static SqliteConnection GetConnection()
+        /// <summary>
+        /// Đường dẫn CSDL nằm cùng kho lưu trữ của Server: &lt;StorageRoot&gt;/Database/BackupServer.sqlite.
+        /// </summary>
+        public static string GetDbFilePathForStorage(string storageRoot)
         {
-            if (!Directory.Exists(DbDirectory))
+            return Path.Combine(Path.GetFullPath(storageRoot), "Database", "BackupServer.sqlite");
+        }
+
+        public static SqliteConnection GetConnection(string? dbFilePath = null)
+        {
+            string path = string.IsNullOrWhiteSpace(dbFilePath) ? DbFilePath : Path.GetFullPath(dbFilePath);
+            string? directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
             {
-                Directory.CreateDirectory(DbDirectory);
+                Directory.CreateDirectory(directory);
             }
 
-            var connection = new SqliteConnection(ConnectionString);
+            var connection = new SqliteConnection($"Data Source={path}");
             connection.Open();
 
             using var pragmaCmd = connection.CreateCommand();
-            pragmaCmd.CommandText = "PRAGMA foreign_keys = ON;";
+            pragmaCmd.CommandText = "PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;";
             pragmaCmd.ExecuteNonQuery();
 
             return connection;
         }
 
-        public static void InitializeDatabase()
+        public static void InitializeDatabase(string? dbFilePath = null)
         {
-            using var conn = GetConnection();
+            using var conn = GetConnection(dbFilePath);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 CREATE TABLE IF NOT EXISTS Users (
@@ -120,7 +129,46 @@ namespace BackupSystem.Server.DataAccess
             ";
             cmd.ExecuteNonQuery();
 
+            MigrateSchema(conn);
             SeedDefaultUserAndConfig(conn);
+        }
+
+        /// <summary>
+        /// Bổ sung các cột mới cho CSDL đã tạo từ phiên bản cũ (CREATE TABLE IF NOT EXISTS không tự thêm cột).
+        /// </summary>
+        private static void MigrateSchema(SqliteConnection conn)
+        {
+            AddColumnIfMissing(conn, "BackupVersions", "ClientBackupId", "TEXT");
+            AddColumnIfMissing(conn, "BackupVersions", "ClientMachineName", "TEXT");
+            AddColumnIfMissing(conn, "BackupVersions", "OriginalSizeBytes", "INTEGER DEFAULT 0");
+            AddColumnIfMissing(conn, "BackupVersions", "CompletedAt", "DATETIME");
+            AddColumnIfMissing(conn, "BackedUpFiles", "IsEncrypted", "INTEGER DEFAULT 0");
+            AddColumnIfMissing(conn, "BackedUpFiles", "IsCompressed", "INTEGER DEFAULT 0");
+            AddColumnIfMissing(conn, "BackedUpFiles", "SourceVersionId", "INTEGER");
+
+            using var idxCmd = conn.CreateCommand();
+            idxCmd.CommandText = @"
+                CREATE INDEX IF NOT EXISTS idx_versions_root ON BackupVersions(UserId, RootClientPath, Status, VersionId DESC);
+                CREATE INDEX IF NOT EXISTS idx_files_version_path ON BackedUpFiles(VersionId, RelativePath);";
+            idxCmd.ExecuteNonQuery();
+        }
+
+        private static void AddColumnIfMissing(SqliteConnection conn, string table, string column, string definition)
+        {
+            using (var check = conn.CreateCommand())
+            {
+                check.CommandText = $"PRAGMA table_info({table});";
+                using var reader = check.ExecuteReader();
+                while (reader.Read())
+                {
+                    if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                        return;
+                }
+            }
+
+            using var alter = conn.CreateCommand();
+            alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition};";
+            alter.ExecuteNonQuery();
         }
 
         private static void SeedDefaultUserAndConfig(SqliteConnection conn)
@@ -143,10 +191,54 @@ namespace BackupSystem.Server.DataAccess
             }
         }
 
+        private const int PasswordHashIterations = 100000;
+
+        /// <summary>
+        /// Băm mật khẩu bằng PBKDF2-SHA256 có salt ngẫu nhiên: "pbkdf2$&lt;iterations&gt;$&lt;salt&gt;$&lt;hash&gt;".
+        /// </summary>
         public static string HashPassword(string plainPassword)
         {
-            byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(plainPassword));
-            return Convert.ToHexString(bytes).ToLowerInvariant();
+            byte[] salt = RandomNumberGenerator.GetBytes(16);
+            byte[] hash = Rfc2898DeriveBytes.Pbkdf2(plainPassword, salt, PasswordHashIterations, HashAlgorithmName.SHA256, 32);
+            return $"pbkdf2${PasswordHashIterations}${Convert.ToBase64String(salt)}${Convert.ToBase64String(hash)}";
+        }
+
+        /// <summary>
+        /// Kiểm tra mật khẩu. Hỗ trợ cả định dạng cũ (SHA-256 hex không salt) để không khóa tài khoản đã tạo trước đây.
+        /// </summary>
+        public static bool VerifyPassword(string plainPassword, string storedHash)
+        {
+            if (string.IsNullOrEmpty(storedHash) || plainPassword == null)
+                return false;
+
+            if (storedHash.StartsWith("pbkdf2$", StringComparison.Ordinal))
+            {
+                string[] parts = storedHash.Split('$');
+                if (parts.Length != 4 || !int.TryParse(parts[1], out int iterations) || iterations <= 0)
+                    return false;
+
+                byte[] salt = Convert.FromBase64String(parts[2]);
+                byte[] expected = Convert.FromBase64String(parts[3]);
+                byte[] actual = Rfc2898DeriveBytes.Pbkdf2(plainPassword, salt, iterations, HashAlgorithmName.SHA256, expected.Length);
+                return CryptographicOperations.FixedTimeEquals(actual, expected);
+            }
+
+            byte[] legacy = SHA256.HashData(Encoding.UTF8.GetBytes(plainPassword));
+            byte[] stored;
+            try
+            {
+                stored = Convert.FromHexString(storedHash);
+            }
+            catch (FormatException)
+            {
+                return false;
+            }
+            return CryptographicOperations.FixedTimeEquals(legacy, stored);
+        }
+
+        public static bool IsLegacyPasswordHash(string storedHash)
+        {
+            return !string.IsNullOrEmpty(storedHash) && !storedHash.StartsWith("pbkdf2$", StringComparison.Ordinal);
         }
     }
 }

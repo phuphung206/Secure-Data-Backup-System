@@ -10,6 +10,12 @@ namespace BackupSystem.Shared.Models
     {
         public string BackupId { get; set; } = string.Empty;
         public string RelativePath { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Khôi phục theo phiên bản: nếu VersionId > 0 thì RelativePath là đường dẫn GỐC trong snapshot,
+        /// Server tra cứu metadata để tìm đúng file vật lý (kể cả file kế thừa từ phiên bản cũ hơn).
+        /// </summary>
+        public int VersionId { get; set; }
     }
 
     /// <summary>
@@ -25,6 +31,9 @@ namespace BackupSystem.Shared.Models
         public int TotalChunks { get; set; }
         public string FileSha256 { get; set; } = string.Empty;
         public string Message { get; set; } = string.Empty;
+        public bool IsEncrypted { get; set; }
+        public bool IsCompressed { get; set; }
+        public string OriginalSha256 { get; set; } = string.Empty;
     }
 
     /// <summary>

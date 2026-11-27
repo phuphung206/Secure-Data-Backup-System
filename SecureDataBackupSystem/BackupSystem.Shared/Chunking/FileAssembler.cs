@@ -101,6 +101,13 @@ namespace BackupSystem.Shared.Chunking
                 if (_fileStream == null)
                     throw new InvalidOperationException("FileStream chưa được mở.");
 
+                // Không tin dữ liệu từ mạng: chỉ số chunk và vùng ghi phải nằm trong kích thước file đã khai báo
+                int dataLength = chunk.Data?.Length ?? 0;
+                if (chunk.ChunkIndex < 0 || chunk.ChunkIndex >= _totalChunks)
+                    throw new InvalidDataException($"Chỉ số chunk {chunk.ChunkIndex} nằm ngoài phạm vi 0..{_totalChunks - 1}.");
+                if (chunk.Offset < 0 || (_expectedTotalBytes >= 0 && chunk.Offset + dataLength > Math.Max(_expectedTotalBytes, 0)))
+                    throw new InvalidDataException($"Chunk {chunk.ChunkIndex} ghi ra ngoài kích thước file đã khai báo.");
+
                 if (_receivedChunks.Contains(chunk.ChunkIndex))
                 {
                     // Đã nhận chunk này trước đó (trùng lặp do truyền lại), bỏ qua ghi đè

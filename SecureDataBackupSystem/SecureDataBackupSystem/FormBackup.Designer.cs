@@ -55,6 +55,8 @@
             this.txtPassword = new System.Windows.Forms.TextBox();
             this.chkEncrypt = new System.Windows.Forms.CheckBox();
             this.fileSystemWatcher1 = new System.IO.FileSystemWatcher();
+            this.lblLocalFilter = new System.Windows.Forms.Label();
+            this.txtLocalFilter = new System.Windows.Forms.TextBox();
             this.btnTheoDoi = new System.Windows.Forms.Button();
             this.grpHistory.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.dgvHistory)).BeginInit();
@@ -218,6 +220,28 @@
             this.progressBar1.Style = System.Windows.Forms.ProgressBarStyle.Continuous;
             this.progressBar1.TabIndex = 10;
             this.progressBar1.Click += new System.EventHandler(this.progressBar1_Click);
+            // 
+            // lblLocalFilter
+            // 
+            this.lblLocalFilter.AutoSize = true;
+            this.lblLocalFilter.Font = new System.Drawing.Font("Segoe UI", 12F, System.Drawing.FontStyle.Bold);
+            this.lblLocalFilter.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(15)))), ((int)(((byte)(50)))), ((int)(((byte)(90)))));
+            this.lblLocalFilter.Location = new System.Drawing.Point(415, 180);
+            this.lblLocalFilter.Margin = new System.Windows.Forms.Padding(7, 0, 7, 0);
+            this.lblLocalFilter.Name = "lblLocalFilter";
+            this.lblLocalFilter.Size = new System.Drawing.Size(170, 32);
+            this.lblLocalFilter.TabIndex = 30;
+            this.lblLocalFilter.Text = "Lọc định dạng";
+            // 
+            // txtLocalFilter
+            // 
+            this.txtLocalFilter.Font = new System.Drawing.Font("Segoe UI", 10F);
+            this.txtLocalFilter.Location = new System.Drawing.Point(420, 222);
+            this.txtLocalFilter.Margin = new System.Windows.Forms.Padding(7, 8, 7, 8);
+            this.txtLocalFilter.Name = "txtLocalFilter";
+            this.txtLocalFilter.Size = new System.Drawing.Size(200, 30);
+            this.txtLocalFilter.TabIndex = 31;
+            this.txtLocalFilter.Text = "*.*";
             // 
             // txtFile
             // 
@@ -469,6 +493,8 @@
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.SystemColors.Control;
             this.ClientSize = new System.Drawing.Size(837, 500);
+            this.Controls.Add(this.txtLocalFilter);
+            this.Controls.Add(this.lblLocalFilter);
             this.Controls.Add(this.btnTheoDoi);
             this.Controls.Add(this.chkEncrypt);
             this.Controls.Add(this.txtPassword);
@@ -537,6 +563,8 @@
         private System.Windows.Forms.TextBox txtPassword;
         private System.IO.FileSystemWatcher fileSystemWatcher1;
         private System.Windows.Forms.Button btnTheoDoi;
+        private System.Windows.Forms.Label lblLocalFilter;
+        private System.Windows.Forms.TextBox txtLocalFilter;
     }
 }
 

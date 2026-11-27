@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using BackupSystem.Server.DataAccess;
 using BackupSystem.Server.StorageManager;
 using BackupSystem.Shared.Models;
 using BackupSystem.Shared.Network;
@@ -20,12 +21,18 @@ namespace BackupSystem.Server.NetworkServer
         private CancellationTokenSource? _cts;
         private readonly ConcurrentDictionary<string, ClientSessionHandler> _sessions;
         private readonly ServerStorageManager _storageManager;
+        private BackupMetadataService? _metadata;
         private bool _isDisposed;
 
         public bool IsRunning { get; private set; }
         public int Port { get; private set; }
         public int ActiveClientsCount => _sessions.Count;
         public ServerStorageManager Storage => _storageManager;
+
+        /// <summary>
+        /// Dịch vụ Metadata (SQLite) nằm cùng kho lưu trữ: &lt;StorageRoot&gt;/Database/BackupServer.sqlite.
+        /// </summary>
+        public BackupMetadataService? Metadata => _metadata;
 
         // Các sự kiện giám sát và hiển thị giao diện UI/Console
         public event Action<int>? OnServerStarted;
@@ -44,12 +51,36 @@ namespace BackupSystem.Server.NetworkServer
         }
 
         /// <summary>
+        /// Khởi tạo CSDL Metadata (người dùng, phiên bản, ánh xạ đường dẫn). Gọi tự động khi Start.
+        /// </summary>
+        public BackupMetadataService InitializeMetadata()
+        {
+            if (_metadata != null)
+                return _metadata;
+
+            var metadata = new BackupMetadataService(
+                DbConnectionFactory.GetDbFilePathForStorage(_storageManager.StorageRoot));
+            metadata.Initialize();
+            _metadata = metadata;
+            return metadata;
+        }
+
+        /// <summary>
         /// Khởi động máy chủ TCP trên cổng chỉ định (Mặc định: 5050).
         /// </summary>
         public void Start(int port = NetworkProtocolConstants.DefaultPort)
         {
             if (IsRunning)
                 throw new InvalidOperationException("Máy chủ đã đang chạy.");
+
+            try
+            {
+                InitializeMetadata();
+            }
+            catch (Exception ex)
+            {
+                Log($"[CẢNH BÁO CSDL] Không khởi tạo được SQLite Metadata, các chức năng phiên bản sẽ bị tắt: {ex.Message}");
+            }
 
             Port = port;
             _cts = new CancellationTokenSource();
@@ -58,7 +89,7 @@ namespace BackupSystem.Server.NetworkServer
             _listener.Start(100); // Backlog 100 kết nối chờ
 
             IsRunning = true;
-            Log($"[SERVER KHỞI ĐỘNG] Máy chủ TCP lắng nghe trên cổng {Port} (Lưu trữ: {_storageManager.StorageRoot}).");
+            Log($"[SERVER KHỞI ĐỘNG] Máy chủ TCP lắng nghe trên cổng {Port} (Lưu trữ: {_storageManager.StorageRoot}, CSDL: {_metadata?.DbFilePath ?? "không có"}).");
             OnServerStarted?.Invoke(Port);
 
             // Bắt đầu vòng lặp tiếp nhận Client bất đồng bộ
@@ -78,7 +109,7 @@ namespace BackupSystem.Server.NetworkServer
                     client.ReceiveBufferSize = 64 * 1024;
                     client.SendBufferSize = 64 * 1024;
 
-                    var session = new ClientSessionHandler(client, _storageManager);
+                    var session = new ClientSessionHandler(client, _storageManager, _metadata);
                     _sessions[session.SessionId] = session;
 
                     // Đăng ký nhận sự kiện từ phiên
