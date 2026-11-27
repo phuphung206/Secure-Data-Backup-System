@@ -15,23 +15,21 @@ namespace SecureDataBackupSystem
             {
                 try
                 {
-                    // Đọc đường dẫn nguồn từ file cấu hình
-                    string configPath = Path.Combine(
-                        Environment.GetFolderPath(
-                            Environment.SpecialFolder.ApplicationData),
-                        "SecureDataBackupSystem",
-                        "schedule_path.txt"
-                    );
-
-                    // Kiểm tra file cấu hình có tồn tại không
-                    if (!File.Exists(configPath))
+                    // Đọc cấu hình lịch (schedule_config.json, tương thích schedule_path.txt cũ)
+                    ScheduleConfig config = ScheduleConfig.Load();
+                    if (config == null)
                         throw new Exception("Chưa có cấu hình lịch sao lưu!");
 
-                    // Lấy đường dẫn file hoặc thư mục cần Backup
-                    string sourcePath = File.ReadAllText(configPath).Trim();
-
-                    // Gọi chức năng sao lưu không cần mở Form
-                    BackupService.RunScheduledBackup(sourcePath);
+                    if (config.UploadToServer)
+                    {
+                        // Sao lưu ngầm lên Server: nén, mã hóa AES-256, AI chống Ransomware và ghi nhận phiên bản (TriggerType = SCHEDULER)
+                        BackupService.RunScheduledNetworkBackup(config.SourcePath, config.Incremental);
+                    }
+                    else
+                    {
+                        // Gọi chức năng sao lưu cục bộ không cần mở Form
+                        BackupService.RunScheduledBackup(config.SourcePath);
+                    }
                 }
                 catch (Exception ex)
                 {

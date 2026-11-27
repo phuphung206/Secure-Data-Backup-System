@@ -46,6 +46,7 @@
             this.btnChooseAutoFile = new System.Windows.Forms.Button();
             this.groupBox1 = new System.Windows.Forms.GroupBox();
             this.groupBox2 = new System.Windows.Forms.GroupBox();
+            this.chkRealtimeServer = new System.Windows.Forms.CheckBox();
             ((System.ComponentModel.ISupportInitialize)(this.numMinutes)).BeginInit();
             this.groupBox1.SuspendLayout();
             this.groupBox2.SuspendLayout();
@@ -80,7 +81,7 @@
             this.lblStatus.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.lblStatus.Font = new System.Drawing.Font("Segoe UI", 12F);
             this.lblStatus.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(15)))), ((int)(((byte)(50)))), ((int)(((byte)(90)))));
-            this.lblStatus.Location = new System.Drawing.Point(35, 466);
+            this.lblStatus.Location = new System.Drawing.Point(35, 498);
             this.lblStatus.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.lblStatus.Name = "lblStatus";
             this.lblStatus.Size = new System.Drawing.Size(500, 25);
@@ -134,6 +135,18 @@
             this.btnTheoDoi.Text = "Bật theo dõi ";
             this.btnTheoDoi.UseVisualStyleBackColor = false;
             this.btnTheoDoi.Click += new System.EventHandler(this.btnTheoDoi_Click);
+            // 
+            // chkRealtimeServer
+            // 
+            this.chkRealtimeServer.AutoSize = true;
+            this.chkRealtimeServer.Font = new System.Drawing.Font("Segoe UI", 10F);
+            this.chkRealtimeServer.Location = new System.Drawing.Point(20, 155);
+            this.chkRealtimeServer.Margin = new System.Windows.Forms.Padding(4);
+            this.chkRealtimeServer.Name = "chkRealtimeServer";
+            this.chkRealtimeServer.Size = new System.Drawing.Size(700, 32);
+            this.chkRealtimeServer.TabIndex = 6;
+            this.chkRealtimeServer.Text = "Tự động đồng bộ thay đổi lên Server (Incremental, mã hóa + nén, AI chống Ransomware)";
+            this.chkRealtimeServer.UseVisualStyleBackColor = true;
             // 
             // numMinutes
             // 
@@ -281,6 +294,7 @@
             // groupBox2
             // 
             this.groupBox2.BackColor = System.Drawing.Color.White;
+            this.groupBox2.Controls.Add(this.chkRealtimeServer);
             this.groupBox2.Controls.Add(this.btnTheoDoi);
             this.groupBox2.Controls.Add(this.btnChooseMonitorFile);
             this.groupBox2.Controls.Add(this.lblFolderMonitor);
@@ -290,7 +304,7 @@
             this.groupBox2.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(15)))), ((int)(((byte)(50)))), ((int)(((byte)(90)))));
             this.groupBox2.Location = new System.Drawing.Point(20, 287);
             this.groupBox2.Name = "groupBox2";
-            this.groupBox2.Size = new System.Drawing.Size(780, 168);
+            this.groupBox2.Size = new System.Drawing.Size(780, 200);
             this.groupBox2.TabIndex = 15;
             this.groupBox2.TabStop = false;
             this.groupBox2.Text = "THEO DÕI DỮ LIỆU";
@@ -300,7 +314,7 @@
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 28F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(235)))), ((int)(((byte)(238)))), ((int)(((byte)(243)))));
-            this.ClientSize = new System.Drawing.Size(950, 500);
+            this.ClientSize = new System.Drawing.Size(950, 535);
             this.Controls.Add(this.lblTitle);
             this.Controls.Add(this.groupBox1);
             this.Controls.Add(this.groupBox2);
@@ -342,5 +356,6 @@
         private System.Windows.Forms.Button btnChooseAutoFile;
         private System.Windows.Forms.GroupBox groupBox1;
         private System.Windows.Forms.GroupBox groupBox2;
+        private System.Windows.Forms.CheckBox chkRealtimeServer;
     }
 }

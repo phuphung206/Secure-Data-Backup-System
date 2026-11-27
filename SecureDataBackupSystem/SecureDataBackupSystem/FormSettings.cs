@@ -124,6 +124,7 @@ namespace SecureDataBackupSystem
             {
                 backupForm.StopFolderMonitoring();// Dừng theo dõi trong FormBackup
                 isMonitoring = false;   // Cập nhật trạng thái
+                chkRealtimeServer.Enabled = true;
                 btnTheoDoi.Text = "Bật theo dõi";  // Đổi tên nút thành Bật theo dõi
                 lblStatus.Text = "Đã tắt theo dõi";  // Hiển thị trạng thái
             }
@@ -138,10 +139,18 @@ namespace SecureDataBackupSystem
                     MessageBox.Show("Vui lòng chọn file hoặc thư mục!");
                     return;
                 }
-                backupForm.StartFolderMonitoring(path);// Bắt đầu theo dõi
+                bool syncToServer = chkRealtimeServer.Checked;
+                if (syncToServer && !ClientSettingsStore.Exists)
+                {
+                    MessageBox.Show("Chưa có cấu hình Server. Hãy chạy \"Sao lưu mạng\" một lần để lưu địa chỉ Server và tài khoản.");
+                    return;
+                }
+
+                backupForm.StartFolderMonitoring(path, syncToServer);// Bắt đầu theo dõi
                 isMonitoring = true; // Cập nhật trạng thái
+                chkRealtimeServer.Enabled = false;
                 btnTheoDoi.Text = "Tắt theo dõi";    // Đổi tên nút thành Tắt theo dõi
-                lblStatus.Text = "Đang theo dõi: " + path;// Hiển thị trạng thái
+                lblStatus.Text = "Đang theo dõi: " + path + (syncToServer ? " (đồng bộ lên Server)" : " (sao lưu cục bộ)");// Hiển thị trạng thái
             }
         }
 

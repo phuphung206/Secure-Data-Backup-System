@@ -46,12 +46,30 @@ namespace BackupSystem.Server.StorageManager
         {
             if (payload == null) throw new ArgumentNullException(nameof(payload));
 
-            string relativePath = payload.RelativePath.Replace('/', Path.DirectorySeparatorChar).TrimStart(Path.DirectorySeparatorChar);
-            string backupFolder = !string.IsNullOrWhiteSpace(payload.BackupId)
-                ? payload.BackupId
-                : "default";
+            string backupFolder = string.IsNullOrWhiteSpace(payload.BackupId) ? "default" : payload.BackupId;
+            string finalDestination;
+            try
+            {
+                // Chống Path Traversal: BackupId và RelativePath đến từ mạng nên phải được kiểm tra
+                // trước khi ghép vào đường dẫn vật lý của kho lưu trữ.
+                if (!SafePathHelper.IsValidBackupId(backupFolder))
+                    throw new InvalidDataException($"BackupId '{payload.BackupId}' không hợp lệ.");
+                if (string.IsNullOrWhiteSpace(payload.TransferId) || !SafePathHelper.IsValidBackupId(payload.TransferId))
+                    throw new InvalidDataException("TransferId không hợp lệ.");
+                if (payload.TotalBytes < 0 || payload.TotalChunks < 0)
+                    throw new InvalidDataException("Kích thước file hoặc số chunk không hợp lệ.");
 
-            string finalDestination = Path.Combine(_backupStoreRoot, backupFolder, relativePath);
+                finalDestination = SafePathHelper.CombineUnderRoot(_backupStoreRoot, backupFolder, payload.RelativePath);
+            }
+            catch (Exception ex) when (ex is InvalidDataException || ex is ArgumentException || ex is PathTooLongException || ex is NotSupportedException)
+            {
+                return new BackupInitResponsePayload
+                {
+                    TransferId = payload.TransferId,
+                    IsAccepted = false,
+                    Message = "Từ chối phiên truyền: " + ex.Message
+                };
+            }
 
             // Tạo FileAssembler quản lý việc nhận và ghép chunk
             var assembler = new FileAssembler(
@@ -60,6 +78,12 @@ namespace BackupSystem.Server.StorageManager
                 payload.TotalBytes,
                 payload.TotalChunks,
                 payload.ExpectedSha256);
+
+            if (_activeAssemblers.TryRemove(payload.TransferId, out var previous))
+            {
+                previous.Abort();
+                previous.Dispose();
+            }
 
             _activeAssemblers[payload.TransferId] = assembler;
             _activeTransfers[payload.TransferId] = payload;
@@ -167,26 +191,44 @@ namespace BackupSystem.Server.StorageManager
         }
 
         /// <summary>
-        /// Chuẩn bị thông tin file cho luồng Restore file về phía Client.
+        /// Chuẩn bị thông tin file cho luồng Restore file về phía Client (theo BackupId + đường dẫn tương đối).
         /// </summary>
         public RestoreInitResponsePayload GetFileForRestore(string backupId, string relativePath, int chunkSize)
         {
-            string cleanRelative = relativePath.Replace('/', Path.DirectorySeparatorChar).TrimStart(Path.DirectorySeparatorChar);
-            string targetPath = Path.Combine(_backupStoreRoot, backupId, cleanRelative);
-
-            if (!File.Exists(targetPath))
+            string? targetPath = GetPhysicalFilePath(backupId, relativePath);
+            if (targetPath == null)
             {
                 return new RestoreInitResponsePayload
                 {
                     FileExists = false,
                     RelativePath = relativePath,
-                    Message = $"Không tìm thấy file trên server: {cleanRelative}"
+                    Message = $"Không tìm thấy file trên server: {relativePath}"
                 };
             }
 
-            var info = new FileInfo(targetPath);
+            return GetFileForRestoreByPhysicalPath(targetPath, relativePath, chunkSize);
+        }
+
+        /// <summary>
+        /// Chuẩn bị Restore từ đường dẫn vật lý đã tra cứu trong CSDL. Đường dẫn vẫn phải nằm trong kho BackupStore.
+        /// </summary>
+        public RestoreInitResponsePayload GetFileForRestoreByPhysicalPath(string physicalPath, string relativePath, int chunkSize)
+        {
+            if (string.IsNullOrWhiteSpace(physicalPath) ||
+                !SafePathHelper.IsUnderRoot(_backupStoreRoot, physicalPath) ||
+                !File.Exists(physicalPath))
+            {
+                return new RestoreInitResponsePayload
+                {
+                    FileExists = false,
+                    RelativePath = relativePath,
+                    Message = $"Không tìm thấy file trên server: {relativePath}"
+                };
+            }
+
+            var info = new FileInfo(physicalPath);
             int totalChunks = FileChunker.CalculateTotalChunks(info.Length, chunkSize);
-            string sha256 = FileChunker.ComputeFileSha256(targetPath);
+            string sha256 = FileChunker.ComputeFileSha256(physicalPath);
 
             return new RestoreInitResponsePayload
             {
@@ -203,12 +245,22 @@ namespace BackupSystem.Server.StorageManager
 
         /// <summary>
         /// Lấy đường dẫn file vật lý trên Server cho mục đích Restore.
+        /// Trả về null nếu BackupId/RelativePath không hợp lệ (ví dụ chứa "..") hoặc file không tồn tại.
         /// </summary>
         public string? GetPhysicalFilePath(string backupId, string relativePath)
         {
-            string cleanRelative = relativePath.Replace('/', Path.DirectorySeparatorChar).TrimStart(Path.DirectorySeparatorChar);
-            string targetPath = Path.Combine(_backupStoreRoot, backupId, cleanRelative);
-            return File.Exists(targetPath) ? targetPath : null;
+            try
+            {
+                if (!SafePathHelper.IsValidBackupId(backupId))
+                    return null;
+
+                string targetPath = SafePathHelper.CombineUnderRoot(_backupStoreRoot, backupId, relativePath);
+                return File.Exists(targetPath) ? targetPath : null;
+            }
+            catch (Exception ex) when (ex is InvalidDataException || ex is ArgumentException || ex is PathTooLongException || ex is NotSupportedException)
+            {
+                return null;
+            }
         }
 
         /// <summary>

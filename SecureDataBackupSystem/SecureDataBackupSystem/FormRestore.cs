@@ -11,9 +11,15 @@ namespace SecureDataBackupSystem
         public string ServerHost { get; set; } = "127.0.0.1";
         public int ServerPort { get; set; } = BackupSystem.Shared.Network.NetworkProtocolConstants.DefaultPort;
 
+        // Tài khoản Server đã lưu ở màn hình Sao lưu mạng (Server chỉ trả về bản backup của tài khoản đã đăng nhập)
+        private readonly ClientSettings _savedSettings;
+
         public FormRestore()
         {
             InitializeComponent();
+            _savedSettings = ClientSettingsStore.Load();
+            ServerHost = _savedSettings.ServerHost;
+            ServerPort = _savedSettings.ServerPort;
             cboBackup.SelectedIndexChanged += cboBackup_SelectedIndexChanged;
         }
 
@@ -104,7 +110,8 @@ namespace SecureDataBackupSystem
                     using (var client = new BackupSystem.Client.NetworkClient.TcpBackupClient())
                     {
                         bool connected = await client.ConnectAsync(ServerHost, ServerPort, 1500);
-                        if (connected)
+                        if (connected &&
+                            (await client.AuthenticateAsync(_savedSettings.Username, _savedSettings.GetPassword())).IsSuccess)
                         {
                             var remoteFiles = await client.ListRemoteBackupFilesAsync();
                             foreach (var entry in remoteFiles)
@@ -593,6 +600,9 @@ namespace SecureDataBackupSystem
                     bool connected = await client.ConnectAsync(ServerHost, ServerPort, 1500);
                     if (!connected) return false;
 
+                    var auth = await client.AuthenticateAsync(_savedSettings.Username, _savedSettings.GetPassword());
+                    if (!auth.IsSuccess) return false;
+
                     lblStatus.Text = $"Đang tải dữ liệu khôi phục từ Server {ServerHost}:{ServerPort}...";
                     var progress = new Progress<BackupSystem.Shared.Models.TransferProgressReport>(report =>
                     {
@@ -606,6 +616,17 @@ namespace SecureDataBackupSystem
             catch
             {
                 return false;
+            }
+        }
+
+        // Mở màn hình Lịch sử phiên bản: khôi phục toàn bộ thư mục hoặc từng file về đúng thời điểm đã chọn
+        private void btnVersionRestore_Click(object sender, EventArgs e)
+        {
+            using (var frm = new FormVersionRestore())
+            {
+                frm.ServerHost = ServerHost;
+                frm.ServerPort = ServerPort;
+                frm.ShowDialog(this);
             }
         }
 

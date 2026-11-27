@@ -48,7 +48,10 @@ namespace BackupSystem.Client.Security
     {
         private static readonly HashSet<string> KnownRansomwareExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            ".locked", ".crypto", ".wnry", ".crypted", ".enc", ".ransom",
+            // Lưu ý: KHÔNG đưa ".enc" vào danh sách vì đó là đuôi file mã hóa hợp lệ của chính hệ thống này
+            // (FormBackup/BackupService/NetworkBackupWorker đều tạo file *.enc). Nếu có, việc sao lưu một thư mục
+            // chứa các bản backup mã hóa cũ sẽ bị chặn nhầm.
+            ".locked", ".crypto", ".wnry", ".crypted", ".ransom",
             ".locky", ".cerber", ".wannacry", ".crypt", ".payme", ".darkside",
             ".revil", ".conti", ".blackmatter", ".stop", ".djvu", ".phobos",
             ".dharma", ".ryuk", ".makop", ".mallox", ".zepto", ".thor"
@@ -151,18 +154,27 @@ namespace BackupSystem.Client.Security
             int highEntropyCount = 0;
             double totalEntropy = 0;
 
+            int ownEncryptedCount = 0;
             foreach (var file in filesList)
             {
+                // File mã hóa do chính Secure Data Backup tạo ra (header "SDB...") có entropy cao là bình thường,
+                // không được tính là dấu hiệu Ransomware.
+                if (IsOwnEncryptedBackupFile(file))
+                {
+                    ownEncryptedCount++;
+                    continue;
+                }
+
+                string fileName = Path.GetFileName(file);
                 string ext = Path.GetExtension(file);
+                string[] parts = fileName.Split('.');
+
+                // Đuôi Ransomware (bao gồm cả đuôi kép như baocao.docx.locked) - mỗi file chỉ tính 1 lần
                 if (!string.IsNullOrEmpty(ext) && KnownRansomwareExtensions.Contains(ext))
                 {
                     suspiciousExtCount++;
                 }
-
-                // Kiểm tra đuôi kép (ví dụ: baocao.docx.locked)
-                string fileName = Path.GetFileName(file);
-                string[] parts = fileName.Split('.');
-                if (parts.Length >= 3 && KnownRansomwareExtensions.Contains("." + parts[parts.Length - 1]))
+                else if (parts.Length >= 3 && KnownRansomwareExtensions.Contains("." + parts[parts.Length - 1]))
                 {
                     suspiciousExtCount++;
                 }
@@ -174,6 +186,17 @@ namespace BackupSystem.Client.Security
                 {
                     highEntropyCount++;
                 }
+            }
+
+            totalFiles -= ownEncryptedCount;
+            if (totalFiles <= 0)
+            {
+                return new RansomwareDetectionResult
+                {
+                    IsRansomwareDetected = false,
+                    ScannedFilesCount = ownEncryptedCount,
+                    Message = $"An toàn. {ownEncryptedCount} file là bản sao lưu mã hóa hợp lệ của hệ thống."
+                };
             }
 
             double avgEntropy = totalEntropy / totalFiles;
@@ -220,6 +243,33 @@ namespace BackupSystem.Client.Security
                     ? "CẢNH BÁO NGUY HIỂM: " + string.Join(" ", reasons)
                     : $"An toàn. Đã phân tích {totalFiles} file (Entropy trung bình: {avgEntropy:F2}, Anomaly Score: {anomalyScore:F2})."
             };
+        }
+
+        /// <summary>
+        /// Nhận diện file mã hóa hợp lệ của hệ thống qua header: "SDBAES256"/"SDBAESv2" (sao lưu mạng),
+        /// "SDBF"/"SDBP" (sao lưu cục bộ), "SDBE" (mã hóa chunk).
+        /// </summary>
+        public static bool IsOwnEncryptedBackupFile(string filePath)
+        {
+            try
+            {
+                byte[] header = new byte[4];
+                using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    if (fs.Read(header, 0, header.Length) != header.Length)
+                        return false;
+                }
+
+                if (header[0] != (byte)'S' || header[1] != (byte)'D' || header[2] != (byte)'B')
+                    return false;
+
+                char kind = (char)header[3];
+                return kind == 'A' || kind == 'F' || kind == 'P' || kind == 'E';
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         public static double CalculateShannonEntropy(string filePath, int sampleBytes = 65536)

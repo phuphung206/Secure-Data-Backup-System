@@ -38,6 +38,10 @@ CREATE TABLE IF NOT EXISTS BackupVersions (
     TotalSizeBytes INTEGER DEFAULT 0,
     Status TEXT NOT NULL DEFAULT 'IN_PROGRESS', -- IN_PROGRESS | COMPLETED | BLOCKED_BY_AI | FAILED
     CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    ClientBackupId TEXT,                 -- Thư mục vật lý BackupStore/<ClientBackupId> chứa file gửi trong phiên bản này
+    ClientMachineName TEXT,
+    OriginalSizeBytes INTEGER DEFAULT 0, -- Tổng dung lượng gốc (trước nén/mã hóa) của snapshot
+    CompletedAt DATETIME,
     FOREIGN KEY (UserId) REFERENCES Users(UserId) ON DELETE CASCADE,
     FOREIGN KEY (ConfigId) REFERENCES BackupConfigs(ConfigId) ON DELETE SET NULL,
     FOREIGN KEY (ParentVersionId) REFERENCES BackupVersions(VersionId) ON DELETE SET NULL
@@ -57,6 +61,9 @@ CREATE TABLE IF NOT EXISTS BackedUpFiles (
     ChangeType TEXT NOT NULL DEFAULT 'MODIFIED', -- ADDED | MODIFIED | UNCHANGED | DELETED
     LastModifiedTime DATETIME NOT NULL,
     ServerPhysicalPath TEXT NOT NULL,
+    IsEncrypted INTEGER DEFAULT 0,       -- File lưu trên Server đã mã hóa AES-256 (SDBAESv2)
+    IsCompressed INTEGER DEFAULT 0,      -- File đã nén GZip trước khi mã hóa
+    SourceVersionId INTEGER,             -- Phiên bản thực sự chứa file vật lý (khác VersionId nếu là UNCHANGED/kế thừa)
     FOREIGN KEY (VersionId) REFERENCES BackupVersions(VersionId) ON DELETE CASCADE
 );
 

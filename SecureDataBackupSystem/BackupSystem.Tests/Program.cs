@@ -33,6 +33,11 @@ namespace BackupSystem.Tests
    7. AES-256 Client-Side Encryption & Key Derivation (PBKDF2)
    8. AI Ransomware Anomaly Detection & Auto-Blocking Engine
    9. Incremental Network Backup & File Extension Filtering
+  10. Path Traversal Protection on Server Storage
+  11. Version Control & Point-in-time Restore (GZip + AES-256)
+  12. Server Metadata: User Authentication & Authorization
+  13. Authenticated Encryption (HMAC) Tamper Detection
+  14. Ransomware AI: no false positive on own .enc backups
 ========================================================================");
             Console.ResetColor();
 
@@ -518,6 +523,289 @@ namespace BackupSystem.Tests
                     server.Stop();
                     server.Dispose();
                     try { Directory.Delete(testRoot, true); } catch { }
+                }
+            });
+
+            // TEST 10: Chống Path Traversal trên Server
+            await RunTest("Security - Server chặn Path Traversal (../) khi ghi và khi khôi phục file", async () =>
+            {
+                string testRoot = Path.Combine(Path.GetTempPath(), "SDB_Traversal_Test_" + Guid.NewGuid().ToString("N"));
+                string serverStorage = Path.Combine(testRoot, "ServerStorage");
+                string clientData = Path.Combine(testRoot, "ClientData");
+                Directory.CreateDirectory(serverStorage);
+                Directory.CreateDirectory(clientData);
+
+                int testPort = 5994;
+                var server = new TcpBackupServer(serverStorage);
+                var client = new TcpBackupClient();
+                try
+                {
+                    server.Start(testPort);
+                    await Task.Delay(200);
+
+                    string payloadFile = Path.Combine(clientData, "evil.txt");
+                    File.WriteAllText(payloadFile, "ghi đè file hệ thống");
+
+                    if (!await client.ConnectAsync("127.0.0.1", testPort))
+                        throw new Exception("Không kết nối được Server.");
+
+                    foreach (string evilPath in new[] { "../../escape.txt", "..\\..\\escape.txt", "/etc/escape.txt", "C:/Windows/escape.txt", "a/../../escape.txt" })
+                    {
+                        bool rejected = false;
+                        try
+                        {
+                            await client.UploadFileAsync(payloadFile, evilPath, "backup_ok");
+                        }
+                        catch (InvalidOperationException)
+                        {
+                            rejected = true;
+                        }
+                        if (!rejected)
+                            throw new Exception($"Server KHÔNG chặn đường dẫn nguy hiểm: {evilPath}");
+                    }
+
+                    bool badIdRejected = false;
+                    try { await client.UploadFileAsync(payloadFile, "ok.txt", "..\\..\\x"); }
+                    catch (InvalidOperationException) { badIdRejected = true; }
+                    if (!badIdRejected) throw new Exception("Server không chặn BackupId chứa '..'.");
+
+                    if (File.Exists(Path.Combine(testRoot, "escape.txt")) || File.Exists(Path.Combine(serverStorage, "escape.txt")))
+                        throw new Exception("File đã bị ghi ra ngoài kho BackupStore!");
+
+                    if (server.Storage.GetPhysicalFilePath("x", "../../ClientData/evil.txt") != null)
+                        throw new Exception("GetPhysicalFilePath cho phép đọc file ngoài kho lưu trữ!");
+
+                    var restoreInfo = server.Storage.GetFileForRestore("..", "ClientData/evil.txt", 64 * 1024);
+                    if (restoreInfo.FileExists)
+                        throw new Exception("GetFileForRestore cho phép đọc file ngoài kho lưu trữ!");
+                }
+                finally
+                {
+                    client.Dispose();
+                    server.Stop();
+                    server.Dispose();
+                    try { Directory.Delete(testRoot, true); } catch { }
+                }
+            });
+
+            // TEST 11: Version Control + Restore về đúng thời điểm (toàn bộ thư mục hoặc 1 file) + nén + mã hóa
+            await RunTest("Version Control - Snapshot theo phiên bản, khôi phục thư mục/file về đúng thời điểm (GZip + AES-256)", async () =>
+            {
+                string testRoot = Path.Combine(Path.GetTempPath(), "SDB_Version_Test_" + Guid.NewGuid().ToString("N"));
+                string serverStorage = Path.Combine(testRoot, "ServerStorage");
+                string clientData = Path.Combine(testRoot, "ClientData");
+                Directory.CreateDirectory(Path.Combine(clientData, "sub"));
+
+                int testPort = 5995;
+                var server = new TcpBackupServer(serverStorage);
+                server.Start(testPort);
+                await Task.Delay(200);
+
+                try
+                {
+                    string fileA = Path.Combine(clientData, "a.txt");
+                    string fileB = Path.Combine(clientData, "sub", "b.txt");
+                    string fileC = Path.Combine(clientData, "c.txt");
+                    string contentA1 = string.Concat(System.Linq.Enumerable.Repeat("Phiên bản 1 của file A - nội dung lặp lại để nén tốt. ", 400));
+                    string contentB1 = "Nội dung file B ở thư mục con.";
+                    File.WriteAllText(fileA, contentA1);
+                    File.WriteAllText(fileB, contentB1);
+
+                    const string aesPassword = "MatKhauAES@2026";
+                    async Task<NetworkBackupWorkerResult> RunBackup(bool incremental)
+                    {
+                        var runner = new NetworkBackupTaskRunner();
+                        return await runner.RunBackupAsync(new NetworkBackupWorkerArgs
+                        {
+                            ServerHost = "127.0.0.1",
+                            ServerPort = testPort,
+                            SourcePath = clientData,
+                            BackupId = "bk_" + Guid.NewGuid().ToString("N"),
+                            IsIncremental = incremental,
+                            EncryptBeforeTransfer = true,
+                            EncryptionPassword = aesPassword,
+                            EnableCompression = true
+                        });
+                    }
+
+                    var v1 = await RunBackup(false);
+                    if (!v1.Success || v1.TransferredFilesCount != 2 || v1.VersionId <= 0)
+                        throw new Exception($"Phiên bản 1 thất bại: {v1.Message}");
+                    if (v1.CompressedFilesCount < 1)
+                        throw new Exception("File văn bản lặp lại phải được nén GZip.");
+
+                    // Dữ liệu trên Server phải là bản đã nén + mã hóa, không đọc được nội dung gốc
+                    string[] stored = Directory.GetFiles(Path.Combine(serverStorage, "BackupStore"), "*", SearchOption.AllDirectories);
+                    if (stored.Length != 2 || !Array.Exists(stored, f => f.EndsWith("a.txt.gz.enc")))
+                        throw new Exception("Server phải lưu file dạng *.gz.enc: " + string.Join(", ", stored));
+                    foreach (string f in stored)
+                    {
+                        if (File.ReadAllText(f).Contains("Phiên bản 1"))
+                            throw new Exception("Server đang lưu dữ liệu ở dạng đọc được!");
+                    }
+
+                    await Task.Delay(50);
+                    File.WriteAllText(fileA, "Phiên bản 2 của file A");
+                    File.Delete(fileB);
+                    File.WriteAllText(fileC, "File C mới thêm ở phiên bản 2");
+
+                    var v2 = await RunBackup(true);
+                    if (!v2.Success || v2.TransferredFilesCount != 2 || v2.BackupType != "INCREMENTAL")
+                        throw new Exception($"Phiên bản 2 (Incremental) sai: {v2.Message}");
+
+                    var v3 = await RunBackup(true);
+                    if (!v3.Success || v3.TransferredFilesCount != 0 || v3.SkippedFilesCount != 2 || v3.SnapshotFilesCount != 2)
+                        throw new Exception($"Phiên bản 3 phải kế thừa 2 file không đổi: {v3.Message}");
+
+                    var options = new RemoteRestoreOptions
+                    {
+                        ServerHost = "127.0.0.1",
+                        ServerPort = testPort,
+                        EncryptionPassword = aesPassword
+                    };
+
+                    var versions = await RemoteRestoreService.ListVersionsAsync(options);
+                    if (versions.Count != 3)
+                        throw new Exception($"Kỳ vọng 3 phiên bản, nhận {versions.Count}.");
+
+                    // Khôi phục TOÀN BỘ thư mục về thời điểm phiên bản 1
+                    string restoreV1 = Path.Combine(testRoot, "RestoreV1");
+                    var r1 = await RemoteRestoreService.RestoreVersionAsync(options, v1.VersionId, restoreV1);
+                    if (r1.RestoredFiles != 2 ||
+                        File.ReadAllText(Path.Combine(restoreV1, "a.txt")) != contentA1 ||
+                        File.ReadAllText(Path.Combine(restoreV1, "sub", "b.txt")) != contentB1 ||
+                        File.Exists(Path.Combine(restoreV1, "c.txt")))
+                        throw new Exception("Khôi phục phiên bản 1 không đúng nội dung tại thời điểm đó.");
+
+                    // Phiên bản 3 (chỉ kế thừa) phải phản ánh trạng thái sau khi sửa A, xóa B, thêm C
+                    string restoreV3 = Path.Combine(testRoot, "RestoreV3");
+                    var r3 = await RemoteRestoreService.RestoreVersionAsync(options, v3.VersionId, restoreV3);
+                    if (r3.RestoredFiles != 2 ||
+                        File.ReadAllText(Path.Combine(restoreV3, "a.txt")) != "Phiên bản 2 của file A" ||
+                        !File.Exists(Path.Combine(restoreV3, "c.txt")) ||
+                        File.Exists(Path.Combine(restoreV3, "sub", "b.txt")))
+                        throw new Exception("Snapshot phiên bản 3 không đúng (kế thừa/xóa file).");
+
+                    // Khôi phục MỘT file đơn lẻ từ phiên bản cũ
+                    string single = Path.Combine(testRoot, "RestoreSingle");
+                    var rs = await RemoteRestoreService.RestoreVersionAsync(options, v1.VersionId, single, new[] { "sub/b.txt" });
+                    if (rs.RestoredFiles != 1 || File.ReadAllText(Path.Combine(single, "sub", "b.txt")) != contentB1)
+                        throw new Exception("Khôi phục 1 file từ phiên bản cũ thất bại.");
+
+                    // Sai mật khẩu AES phải bị từ chối
+                    bool wrongPwdRejected = false;
+                    try
+                    {
+                        options.EncryptionPassword = "sai_mat_khau";
+                        await RemoteRestoreService.RestoreVersionAsync(options, v1.VersionId, Path.Combine(testRoot, "RestoreWrong"));
+                    }
+                    catch (InvalidDataException) { wrongPwdRejected = true; }
+                    if (!wrongPwdRejected) throw new Exception("Giải mã với mật khẩu sai không bị chặn.");
+                }
+                finally
+                {
+                    server.Stop();
+                    server.Dispose();
+                    try { Directory.Delete(testRoot, true); } catch { }
+                }
+            });
+
+            // TEST 12: Xác thực tài khoản & phân quyền phiên bản
+            await RunTest("Metadata Server - Đăng nhập tài khoản, từ chối sai mật khẩu và truy cập phiên bản khi chưa đăng nhập", async () =>
+            {
+                string testRoot = Path.Combine(Path.GetTempPath(), "SDB_Auth_Test_" + Guid.NewGuid().ToString("N"));
+                int testPort = 5996;
+                var server = new TcpBackupServer(testRoot);
+                server.Start(testPort);
+                await Task.Delay(200);
+                var client = new TcpBackupClient();
+                try
+                {
+                    if (!await client.ConnectAsync("127.0.0.1", testPort)) throw new Exception("Không kết nối được.");
+
+                    bool listBlocked = false;
+                    try { await client.ListVersionsAsync(); }
+                    catch (InvalidOperationException) { listBlocked = true; }
+                    if (!listBlocked) throw new Exception("Chưa đăng nhập mà vẫn xem được lịch sử phiên bản.");
+
+                    var bad = await client.AuthenticateAsync("admin", "sai");
+                    if (bad.IsSuccess) throw new Exception("Sai mật khẩu nhưng vẫn đăng nhập được.");
+
+                    server.Metadata!.Users.CreateUser("sinhvien", "matkhau123");
+                    var ok = await client.AuthenticateAsync("sinhvien", "matkhau123");
+                    if (!ok.IsSuccess) throw new Exception("Tài khoản mới không đăng nhập được: " + ok.Message);
+
+                    var list = await client.ListVersionsAsync();
+                    if (list.Count != 0) throw new Exception("Tài khoản mới không được thấy phiên bản của người khác.");
+
+                    if (!File.Exists(Path.Combine(testRoot, "Database", "BackupServer.sqlite")))
+                        throw new Exception("CSDL Metadata không nằm trong kho lưu trữ của Server.");
+                }
+                finally
+                {
+                    client.Dispose();
+                    server.Stop();
+                    server.Dispose();
+                    try { Directory.Delete(testRoot, true); } catch { }
+                }
+            });
+
+            // TEST 13: AES-256 có xác thực - phát hiện dữ liệu bị sửa
+            await RunTest("Security - AES-256 + HMAC-SHA256: phát hiện file mã hóa bị chỉnh sửa trên Server", async () =>
+            {
+                string tempDir = Path.Combine(Path.GetTempPath(), "SDB_Tamper_" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(tempDir);
+                try
+                {
+                    string original = Path.Combine(tempDir, "data.bin");
+                    string encrypted = Path.Combine(tempDir, "data.bin.enc");
+                    byte[] data = new byte[100_000];
+                    new Random(5).NextBytes(data);
+                    File.WriteAllBytes(original, data);
+                    AesEncryptionHelper.EncryptFile(original, encrypted, "pw123456");
+
+                    byte[] bytes = File.ReadAllBytes(encrypted);
+                    bytes[bytes.Length / 2] ^= 0x01;
+                    File.WriteAllBytes(encrypted, bytes);
+
+                    try
+                    {
+                        AesEncryptionHelper.DecryptFile(encrypted, Path.Combine(tempDir, "out.bin"), "pw123456");
+                        throw new Exception("Không phát hiện được dữ liệu mã hóa bị sửa!");
+                    }
+                    catch (CryptographicException) { }
+
+                    if (File.Exists(Path.Combine(tempDir, "out.bin")))
+                        throw new Exception("Không được tạo file đầu ra khi xác thực thất bại.");
+                }
+                finally
+                {
+                    try { Directory.Delete(tempDir, true); } catch { }
+                }
+            });
+
+            // TEST 14: Không chặn nhầm thư mục chứa các bản backup .enc của chính hệ thống
+            await RunTest("AI Anomaly Detection - Không báo động nhầm với file .enc do chính hệ thống tạo", async () =>
+            {
+                string tempDir = Path.Combine(Path.GetTempPath(), "SDB_OwnEnc_" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(tempDir);
+                try
+                {
+                    for (int i = 0; i < 6; i++)
+                    {
+                        string plain = Path.Combine(tempDir, $"report_{i}.txt");
+                        File.WriteAllText(plain, "Báo cáo " + i + string.Concat(System.Linq.Enumerable.Repeat(" nội dung", 200)));
+                        AesEncryptionHelper.EncryptFile(plain, plain + ".enc", "pw123456");
+                        File.Delete(plain);
+                    }
+
+                    var result = RansomwareProtectionService.AnalyzeFiles(tempDir);
+                    if (result.IsRansomwareDetected)
+                        throw new Exception($"Chặn nhầm thư mục backup .enc hợp lệ! {result.Message}");
+                }
+                finally
+                {
+                    try { Directory.Delete(tempDir, true); } catch { }
                 }
             });
 

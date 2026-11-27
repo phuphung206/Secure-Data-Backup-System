@@ -108,7 +108,8 @@ namespace SecureDataBackupSystem
         bool isIncremental,
         bool encrypt,
         string password,
-        IProgress<int> progress)
+        IProgress<int> progress,
+        Func<string, bool> includeFile = null)
         {
             if (encrypt && string.IsNullOrWhiteSpace(password))
                 throw new Exception("Vui lòng nhập mật khẩu mã hóa!");
@@ -192,7 +193,8 @@ namespace SecureDataBackupSystem
                             System.IO.File.Delete(tempEncrypted);
                     }
                 },
-                progress);
+                progress,
+                includeFile);
         }
 
         private void DecryptFile(string source, string destination, string password)
@@ -419,6 +421,17 @@ namespace SecureDataBackupSystem
                         new System.IO.DirectoryInfo(sourcePath).Name)
                     : backupRoot;
 
+                // Lọc theo định dạng file (ví dụ: *.docx;*.pdf) - dùng chung quy tắc với sao lưu mạng
+                string filterText = string.IsNullOrWhiteSpace(txtLocalFilter.Text) ? "*.*" : txtLocalFilter.Text.Trim();
+                Func<string, bool> includeFile = relative =>
+                    BackupSystem.Client.NetworkClient.NetworkBackupEngine.IsFileAllowed(relative, filterText, string.Empty);
+
+                if (!isDirectory && !includeFile(System.IO.Path.GetFileName(sourcePath)))
+                {
+                    MessageBox.Show("File đã chọn không khớp bộ lọc định dạng: " + filterText);
+                    return;
+                }
+
                 // [AI Ransomware Protection] Kiểm tra độ bất thường & quét mã độc trước khi sao lưu
                 try
                 {
@@ -462,7 +475,8 @@ namespace SecureDataBackupSystem
                             isIncremental,
                             encrypt,
                             password,
-                            progress);
+                            progress,
+                            includeFile);
                         return 1;
                     }
 
@@ -560,7 +574,8 @@ namespace SecureDataBackupSystem
                                     System.IO.File.Delete(tempEncrypted);
                             }
                         },
-                        progress);
+                        progress,
+                        includeFile);
                 });
 
                 if (isDirectory)
@@ -1074,14 +1089,17 @@ namespace SecureDataBackupSystem
         public void StopFolderMonitoring()
         {
             fileSystemWatcher1.EnableRaisingEvents = false;// Dừng nhận các sự kiện thay đổi
+            _realtimeDebounce?.Stop();
+            _realtimePending = false;
             lblStatus.Text = "Đã tắt theo dõi";// Cập nhật trạng thái
         }
 
         // Hàm theo dõi thay đổi của file hoặc thư mục
-        public void StartFolderMonitoring(string path)
+        public void StartFolderMonitoring(string path, bool syncToServer = false)
         {
             fileSystemWatcher1.EnableRaisingEvents = false;  // Tạm dừng theo dõi trước khi cấu hình
             _monitoredPath = path;
+            _syncToServer = syncToServer;
 
             // Đảm bảo Handle tồn tại ngay cả khi tab Sao lưu chưa được mở
             if (!this.IsHandleCreated)
@@ -1134,7 +1152,7 @@ namespace SecureDataBackupSystem
                 System.IO.NotifyFilters.LastWrite;
 
             fileSystemWatcher1.EnableRaisingEvents = true;  // Bật chức năng theo dõi
-            lblStatus.Text = "Đang theo dõi: " + path;   // Cập nhật trạng thái
+            lblStatus.Text = "Đang theo dõi: " + path + (syncToServer ? " (đồng bộ lên Server)" : string.Empty);   // Cập nhật trạng thái
         }
 
         private void FileRenamed(object sender, System.IO.RenamedEventArgs e)
@@ -1163,7 +1181,13 @@ namespace SecureDataBackupSystem
                 return;
 
             string fileName = System.IO.Path.GetFileName(fullPath);
-            if (string.IsNullOrEmpty(fileName) || fileName.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrEmpty(fileName) ||
+                fileName.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
+                fileName.StartsWith("~$", StringComparison.Ordinal))
+                return;
+
+            // Bỏ qua thay đổi bên trong kho Backup của chính chương trình (tránh vòng lặp vô hạn)
+            if (IsInsideBackupRoot(fullPath))
                 return;
 
             // Chống lặp sự kiện trong vòng 800ms cho cùng 1 file & hành động
@@ -1192,20 +1216,15 @@ namespace SecureDataBackupSystem
                     }
                     catch { }
 
-                    // Nếu thêm hoặc sửa file và không vướng mật khẩu trống, tự động backup file đó sang SecureDataBackup
-                    if ((action == "Đã thêm" || action == "Đã sửa") && System.IO.File.Exists(fullPath))
+                    if (_syncToServer)
                     {
-                        try
-                        {
-                            string backupRoot = BackupSystem.Shared.Models.BackupPaths.GetBackupRoot();
-                            string destFolder = System.IO.Directory.Exists(_monitoredPath)
-                                ? System.IO.Path.Combine(backupRoot, new System.IO.DirectoryInfo(_monitoredPath).Name)
-                                : backupRoot;
-                            System.IO.Directory.CreateDirectory(destFolder);
-                            string destFile = System.IO.Path.Combine(destFolder, fileName);
-                            System.IO.File.Copy(fullPath, destFile, true);
-                        }
-                        catch { }
+                        // Đồng bộ lên Server: gom các thay đổi liên tiếp (debounce) rồi chạy một lần Incremental,
+                        // tạo phiên bản mới trên Server (TriggerType = WATCHER). File bị xóa sẽ không có trong snapshot mới.
+                        ScheduleRealtimeServerSync();
+                    }
+                    else if ((action == "Đã thêm" || action == "Đã sửa") && System.IO.File.Exists(fullPath))
+                    {
+                        CopyChangedFileLocally(fullPath);
                     }
                 };
 
@@ -1219,6 +1238,129 @@ namespace SecureDataBackupSystem
             }
 
             MonitoringEventDetected?.Invoke(statusMsg);
+        }
+
+        private bool _syncToServer;
+        private System.Windows.Forms.Timer _realtimeDebounce;
+        private bool _realtimeRunning;
+        private bool _realtimePending;
+
+        private static bool IsInsideBackupRoot(string fullPath)
+        {
+            try
+            {
+                return BackupSystem.Shared.Models.SafePathHelper.IsUnderRoot(
+                    BackupSystem.Shared.Models.BackupPaths.GetBackupRoot(), fullPath);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Sao lưu cục bộ khi Real-time không đồng bộ Server: giữ nguyên cấu trúc thư mục con
+        /// (trước đây mọi file bị dồn chung một cấp và có thể ghi đè lẫn nhau).
+        /// </summary>
+        private void CopyChangedFileLocally(string fullPath)
+        {
+            try
+            {
+                string backupRoot = BackupSystem.Shared.Models.BackupPaths.GetBackupRoot();
+                string relative = System.IO.Path.GetFileName(fullPath);
+                string destFolder = backupRoot;
+
+                if (System.IO.Directory.Exists(_monitoredPath))
+                {
+                    string monitored = System.IO.Path.GetFullPath(_monitoredPath)
+                        .TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
+                    destFolder = System.IO.Path.Combine(backupRoot, new System.IO.DirectoryInfo(monitored).Name);
+                    string full = System.IO.Path.GetFullPath(fullPath);
+                    if (full.StartsWith(monitored + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                        relative = full.Substring(monitored.Length + 1);
+                }
+
+                string destFile = BackupSystem.Shared.Models.SafePathHelper.CombineUnderRoot(destFolder, relative);
+                System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(destFile));
+                System.IO.File.Copy(fullPath, destFile, true);
+            }
+            catch
+            {
+                // File có thể đang bị khóa bởi chương trình khác; lần thay đổi kế tiếp sẽ sao lưu lại
+            }
+        }
+
+        private void ScheduleRealtimeServerSync()
+        {
+            if (_realtimeDebounce == null)
+            {
+                _realtimeDebounce = new System.Windows.Forms.Timer { Interval = 3000 };
+                _realtimeDebounce.Tick += async (s, e) =>
+                {
+                    _realtimeDebounce.Stop();
+                    await RunRealtimeServerSyncAsync();
+                };
+            }
+
+            if (_realtimeRunning)
+            {
+                _realtimePending = true; // Đang gửi → chạy thêm một lượt sau khi xong
+                return;
+            }
+
+            _realtimeDebounce.Stop();
+            _realtimeDebounce.Start();
+        }
+
+        private async Task RunRealtimeServerSyncAsync()
+        {
+            if (_realtimeRunning || string.IsNullOrWhiteSpace(_monitoredPath))
+                return;
+
+            _realtimeRunning = true;
+            _realtimePending = false;
+            string path = _monitoredPath;
+            string time = DateTime.Now.ToString("dd/MM/yyyy HH:mm:ss");
+            string statusText;
+
+            try
+            {
+                lblStatus.Text = "Real-time: đang đồng bộ thay đổi lên Server...";
+                var settings = ClientSettingsStore.Load();
+                var args = settings.ToWorkerArgs(path, true, "WATCHER");
+                var result = await Task.Run(() => new BackupSystem.Client.NetworkClient.NetworkBackupEngine().Run(args));
+
+                if (result.Success)
+                    statusText = $"Đồng bộ Server thành công - phiên bản #{result.VersionId} ({result.TransferredFilesCount} file gửi)";
+                else if (result.RansomwareThreat != null)
+                    statusText = "Chặn bởi AI Ransomware";
+                else
+                    statusText = "Đồng bộ Server thất bại: " + result.Message;
+            }
+            catch (Exception ex)
+            {
+                statusText = "Đồng bộ Server thất bại: " + ex.Message;
+            }
+            finally
+            {
+                _realtimeRunning = false;
+            }
+
+            statusText = statusText.Replace("\t", " ").Replace("\r", " ").Replace("\n", " ");
+            lblStatus.Text = "Real-time: " + statusText;
+            dgvHistory.Rows.Add(time, "Real-time → Server", path, statusText);
+            try
+            {
+                System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(historyPath));
+                System.IO.File.AppendAllText(historyPath,
+                    string.Join("\t", time, "Real-time → Server", path, statusText) + Environment.NewLine);
+            }
+            catch { }
+
+            MonitoringEventDetected?.Invoke(statusText);
+
+            if (_realtimePending && fileSystemWatcher1.EnableRaisingEvents)
+                ScheduleRealtimeServerSync();
         }
 
         private void txtFile_TextChanged(object sender, EventArgs e)

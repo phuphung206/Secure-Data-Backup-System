@@ -15,5 +15,8 @@ namespace BackupSystem.Shared.Models
         public long TotalSizeBytes { get; set; }
         public string Status { get; set; } = "IN_PROGRESS";
         public DateTime CreatedAt { get; set; } = DateTime.Now;
+        public string ClientBackupId { get; set; } = string.Empty; // Tên thư mục vật lý BackupStore/<ClientBackupId>
+        public string ClientMachineName { get; set; } = string.Empty;
+        public long OriginalSizeBytes { get; set; }
     }
 }
